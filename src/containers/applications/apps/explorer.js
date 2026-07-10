@@ -3,6 +3,7 @@ import {useSelector, useDispatch} from 'react-redux';
 import {Icon, Image, ToolBar} from '../../../utils/general';
 import {TauriToolBar} from '../../../components/TauriToolBar';
 import {dispatchAction, handleFileOpen} from '../../../actions';
+import {addCloud, getUser, listSpaces, listFiles} from '../../../utils/cloudApi';
 import './assets/fileexpo.scss';
 
 const NavTitle = (props)=>{
@@ -214,7 +215,11 @@ export const Explorer = (props)=>{
         <TauriToolBar icon="explorer" name="KOSMOS Explorer"/>
         {clouds.dialogOpen && <CloudDialogContent
           onClose={()=>dispatch({type:'CLOUD_DIALOG_CLOSE'})}
-          onSave={(data)=>{dispatch({type:'CLOUD_ADD', payload:data}); dispatch({type:'CLOUD_DIALOG_CLOSE'});}}
+          onSave={async (data)=>{
+            const list = await addCloud(data.name, data.url, data.token);
+            dispatch({type:'CLOUD_SET_LIST', payload: list});
+            dispatch({type:'CLOUD_DIALOG_CLOSE'});
+          }}
         />}
         <div className="windowScreen flex flex-col" style={{flex: 1}}>
           <Ribbon onNew={()=>dispatch({type:'CLOUD_DIALOG_OPEN'})}/>
@@ -351,7 +356,6 @@ const NavPane = ({})=>{
     const cloud = clouds.list[ci];
     if(!cloud || !cloud.token) return;
     try {
-      const {getUser, listSpaces, listFiles} = await import('../../../utils/cloudApi');
       const user = await getUser(cloud.url, cloud.token);
       const spaces = await listSpaces(cloud.url, cloud.token);
       dispatch({type: 'CLOUD_CONNECTED', payload: {index: ci, user, spaces, token: cloud.token}});
@@ -390,7 +394,6 @@ const NavPane = ({})=>{
     const cloud = clouds.list[ci];
     if(!cloud || !cloud.token) return;
     try {
-      const {listFiles} = await import('../../../utils/cloudApi');
       const spaceId = files.data.special[space.id];
       if(spaceId) dispatch({type: 'FILEDIR', payload: spaceId});
 

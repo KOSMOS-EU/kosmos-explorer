@@ -1,8 +1,9 @@
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::fs;
+use std::path::PathBuf;
 use std::sync::Mutex;
-use tauri::State;
+use tauri::{AppHandle, Manager, State};
 
 // ── Types ──
 
@@ -55,6 +56,29 @@ impl CloudState {
     }
 }
 
+// ── Persistence ──
+
+fn config_path(app: &AppHandle) -> PathBuf {
+    let dir = app.path().app_config_dir().unwrap_or_else(|_| PathBuf::from("."));
+    fs::create_dir_all(&dir).ok();
+    dir.join("clouds.json")
+}
+
+fn load_clouds_from_disk(app: &AppHandle) -> Vec<CloudConfig> {
+    let path = config_path(app);
+    match fs::read_to_string(&path) {
+        Ok(data) => serde_json::from_str(&data).unwrap_or_default(),
+        Err(_) => Vec::new(),
+    }
+}
+
+fn save_clouds_to_disk(app: &AppHandle, clouds: &[CloudConfig]) {
+    let path = config_path(app);
+    if let Ok(data) = serde_json::to_string_pretty(clouds) {
+        fs::write(path, data).ok();
+    }
+}
+
 // ── API helpers ──
 
 async fn api_get(
@@ -84,7 +108,64 @@ async fn api_get(
         .map_err(|e| format!("JSON-Fehler: {}", e))
 }
 
-// ── Tauri Commands ──
+// ── Tauri Commands: Cloud Management ──
+
+#[tauri::command]
+pub fn cloud_load(state: State<'_, CloudState>, app: AppHandle) -> Vec<CloudConfig> {
+    let from_disk = load_clouds_from_disk(&app);
+    let mut clouds = state.clouds.lock().unwrap();
+    *clouds = from_disk.clone();
+    from_disk
+}
+
+#[tauri::command]
+pub fn cloud_add(
+    state: State<'_, CloudState>,
+    app: AppHandle,
+    name: String,
+    url: String,
+    token: Option<String>,
+) -> Vec<CloudConfig> {
+    let mut clouds = state.clouds.lock().unwrap();
+    clouds.push(CloudConfig {
+        name,
+        url: url.trim_end_matches('/').to_string(),
+        token,
+    });
+    save_clouds_to_disk(&app, &clouds);
+    clouds.clone()
+}
+
+#[tauri::command]
+pub fn cloud_remove(
+    state: State<'_, CloudState>,
+    app: AppHandle,
+    index: usize,
+) -> Vec<CloudConfig> {
+    let mut clouds = state.clouds.lock().unwrap();
+    if index < clouds.len() {
+        clouds.remove(index);
+        save_clouds_to_disk(&app, &clouds);
+    }
+    clouds.clone()
+}
+
+#[tauri::command]
+pub fn cloud_update_token(
+    state: State<'_, CloudState>,
+    app: AppHandle,
+    index: usize,
+    token: String,
+) -> Vec<CloudConfig> {
+    let mut clouds = state.clouds.lock().unwrap();
+    if let Some(cloud) = clouds.get_mut(index) {
+        cloud.token = Some(token);
+        save_clouds_to_disk(&app, &clouds);
+    }
+    clouds.clone()
+}
+
+// ── Tauri Commands: API ──
 
 #[tauri::command]
 pub async fn cloud_get_user(
@@ -160,7 +241,6 @@ pub async fn cloud_list_files(
         })
         .collect();
 
-    // Sort: folders first, then by name
     items.sort_by(|a, b| {
         if a.is_folder != b.is_folder {
             return if a.is_folder {

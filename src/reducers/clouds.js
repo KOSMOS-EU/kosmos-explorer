@@ -1,21 +1,11 @@
 // Cloud state management
 // Clouds are persisted in localStorage, files are fetched from API
 
-const loadClouds = () => {
-  try {
-    const raw = localStorage.getItem('kosmos-clouds');
-    return raw ? JSON.parse(raw) : [];
-  } catch { return []; }
-};
-
-const saveClouds = (clouds) => {
-  localStorage.setItem('kosmos-clouds', JSON.stringify(
-    clouds.map(c => ({ name: c.name, url: c.url, token: c.token }))
-  ));
-};
+// Cloud persistence is handled by Rust backend (cloud_load, cloud_add, etc.)
+// Redux store holds the runtime state; Rust holds the persisted config.
 
 const defState = {
-  list: loadClouds(),        // [{name, url, token?, connected?, user?, spaces?}]
+  list: [],        // [{name, url, token?, connected?, user?, spaces?}]
   activeCloud: null,         // index into list
   activeSpace: null,         // space id
   cdir: null,                // current directory path (/ or /subdir/...)
@@ -32,6 +22,10 @@ const cloudReducer = (state = defState, action) => {
   const tmp = { ...state };
 
   switch (action.type) {
+    case 'CLOUD_SET_LIST': {
+      tmp.list = action.payload;
+      break;
+    }
     case 'CLOUD_DIALOG_OPEN': {
       tmp.dialogOpen = true;
       break;
@@ -43,7 +37,7 @@ const cloudReducer = (state = defState, action) => {
     case 'CLOUD_ADD': {
       const cloud = { name: action.payload.name, url: action.payload.url, connected: false };
       tmp.list = [...tmp.list, cloud];
-      saveClouds(tmp.list);
+
       break;
     }
     case 'CLOUD_REMOVE': {
@@ -54,13 +48,13 @@ const cloudReducer = (state = defState, action) => {
         tmp.files = [];
         tmp.view = 'settings';
       }
-      saveClouds(tmp.list);
+
       break;
     }
     case 'CLOUD_UPDATE': {
       const { index, ...updates } = action.payload;
       tmp.list = tmp.list.map((c, i) => i === index ? { ...c, ...updates } : c);
-      saveClouds(tmp.list);
+
       break;
     }
     case 'CLOUD_CONNECTED': {
@@ -77,7 +71,7 @@ const cloudReducer = (state = defState, action) => {
       tmp.view = 'explorer';
       tmp.hist = [{ space: tmp.activeSpace, path: '/' }];
       tmp.hid = 0;
-      saveClouds(tmp.list);
+
       break;
     }
     case 'CLOUD_DISCONNECTED': {
@@ -90,7 +84,7 @@ const cloudReducer = (state = defState, action) => {
         tmp.files = [];
         tmp.view = 'settings';
       }
-      saveClouds(tmp.list);
+
       break;
     }
     case 'CLOUD_SELECT_SPACE': {
