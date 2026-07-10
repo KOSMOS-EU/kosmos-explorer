@@ -22,11 +22,11 @@ export async function loadClouds() {
   try { return JSON.parse(localStorage.getItem('kosmos-clouds') || '[]'); } catch { return []; }
 }
 
-export async function addCloud(name, url, token) {
+export async function addCloud(name, url) {
   const inv = await getInvoke();
-  if (inv) return inv('cloud_add', { name, url, token: token || null });
+  if (inv) return inv('cloud_add', { name, url });
   const clouds = await loadClouds();
-  clouds.push({ name, url, token });
+  clouds.push({ name, url });
   localStorage.setItem('kosmos-clouds', JSON.stringify(clouds));
   return clouds;
 }
@@ -47,6 +47,35 @@ export async function updateToken(index, token) {
   if (clouds[index]) clouds[index].token = token;
   localStorage.setItem('kosmos-clouds', JSON.stringify(clouds));
   return clouds;
+}
+
+// ── OIDC Login ──
+
+export async function oidcLogin(url) {
+  const inv = await getInvoke();
+  if (!inv) throw new Error('OIDC nur in Tauri verfügbar');
+
+  // Get auth URL from Rust (starts callback server)
+  const authUrl = await inv('oidc_start', { url });
+
+  // Open login window
+  const { WebviewWindow } = await import('@tauri-apps/api/webviewWindow');
+  const loginWin = new WebviewWindow('login', {
+    url: authUrl,
+    title: 'Anmelden',
+    width: 480,
+    height: 640,
+    center: true,
+    resizable: true,
+  });
+
+  // Wait for token from Rust callback server
+  const token = await inv('oidc_wait');
+
+  // Close login window
+  try { await loginWin.close(); } catch {}
+
+  return token;
 }
 
 // ── API (via Rust backend) ──

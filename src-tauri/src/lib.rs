@@ -1,9 +1,11 @@
-mod cloud;
+pub mod cloud;
+pub mod oidc;
 
 use cloud::{
     cloud_add, cloud_get_user, cloud_list_files, cloud_list_spaces,
     cloud_load, cloud_remove, cloud_update_token, CloudState,
 };
+use oidc::{oidc_start, oidc_wait};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -17,6 +19,8 @@ pub fn run() {
             cloud_get_user,
             cloud_list_spaces,
             cloud_list_files,
+            oidc_start,
+            oidc_wait,
         ])
         .setup(|app| {
             if cfg!(debug_assertions) {

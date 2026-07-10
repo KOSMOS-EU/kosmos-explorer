@@ -3,7 +3,7 @@ import {useSelector, useDispatch} from 'react-redux';
 import {Icon, Image, ToolBar} from '../../../utils/general';
 import {TauriToolBar} from '../../../components/TauriToolBar';
 import {dispatchAction, handleFileOpen} from '../../../actions';
-import {addCloud, getUser, listSpaces, listFiles} from '../../../utils/cloudApi';
+import {addCloud, getUser, listSpaces, listFiles, oidcLogin, updateToken} from '../../../utils/cloudApi';
 import './assets/fileexpo.scss';
 
 const NavTitle = (props)=>{
@@ -77,11 +77,10 @@ const CloudDialogOverlay = ({onClose})=>(
 const CloudDialogContent = ({onClose, onSave})=>{
   const [name, setName] = useState('');
   const [url, setUrl] = useState('');
-  const [token, setToken] = useState('');
 
   const handleSave = ()=>{
     if(!name.trim() || !url.trim()) return;
-    onSave({name: name.trim(), url: url.trim(), token: token.trim() || undefined});
+    onSave({name: name.trim(), url: url.trim()});
   }
 
   return (
@@ -113,14 +112,6 @@ const CloudDialogContent = ({onClose, onSave})=>{
           <div className="text-xss" style={{marginBottom:4, color:'var(--txt-col)'}}>Server-URL</div>
           <input className="path-field" value={url} onChange={e=>setUrl(e.target.value)}
             placeholder="https://cloud.example.org"
-            style={{width:'100%', padding:'6px 8px', borderRadius:4,
-              border:'1px solid var(--gray-txt)', background:'var(--bg1)',
-              color:'var(--txt-col)'}}/>
-        </div>
-        <div>
-          <div className="text-xss" style={{marginBottom:4, color:'var(--txt-col)'}}>Access Token (optional)</div>
-          <input className="path-field" type="password" value={token} onChange={e=>setToken(e.target.value)}
-            placeholder="Token eingeben"
             style={{width:'100%', padding:'6px 8px', borderRadius:4,
               border:'1px solid var(--gray-txt)', background:'var(--bg1)',
               color:'var(--txt-col)'}}/>
@@ -216,7 +207,7 @@ export const Explorer = (props)=>{
         {clouds.dialogOpen && <CloudDialogContent
           onClose={()=>dispatch({type:'CLOUD_DIALOG_CLOSE'})}
           onSave={async (data)=>{
-            const list = await addCloud(data.name, data.url, data.token);
+            const list = await addCloud(data.name, data.url);
             dispatch({type:'CLOUD_SET_LIST', payload: list});
             dispatch({type:'CLOUD_DIALOG_CLOSE'});
           }}
@@ -354,61 +345,59 @@ const NavPane = ({})=>{
 
   const connectCloud = async (ci)=>{
     const cloud = clouds.list[ci];
-    if(!cloud || !cloud.token) return;
-    try {
-      const user = await getUser(cloud.url, cloud.token);
-      const spaces = await listSpaces(cloud.url, cloud.token);
-      dispatch({type: 'CLOUD_CONNECTED', payload: {index: ci, user, spaces, token: cloud.token}});
+    if(!cloud) return;
 
-      // Inject spaces as folders into the Bin store
-      for(const space of spaces){
-        dispatch({type: 'CLOUD_INJECT_SPACE', payload: {
-          name: space.name, spaceId: space.id,
-          icon: space.driveType === 'personal' ? 'user' : 'folder'
-        }});
+    let token = cloud.token;
+
+    // If we have a token, try it first
+    if(token) {
+      try {
+        const user = await getUser(cloud.url, token);
+        const spaces = await listSpaces(cloud.url, token);
+        dispatch({type: 'CLOUD_CONNECTED', payload: {index: ci, user, spaces, token}});
+        const firstSpace = spaces.find(s => s.driveType === 'personal') || spaces[0];
+        if(firstSpace){
+          dispatch({type: 'CLOUD_SELECT_SPACE', payload: firstSpace.id});
+          const items = await listFiles(cloud.url, token, firstSpace.id, '/');
+          dispatch({type: 'CLOUD_FILES_LOADED', payload: items});
+        }
+        return; // Success, done
+      } catch(err) {
+        // Token expired or invalid, fall through to OIDC
       }
+    }
 
-      // Navigate to first space and load files
+    // No token or token expired → OIDC login
+    try {
+      token = await oidcLogin(cloud.url);
+      // Save the bearer
+      await updateToken(ci, token);
+      dispatch({type: 'CLOUD_UPDATE', payload: {index: ci, token}});
+
+      const user = await getUser(cloud.url, token);
+      const spaces = await listSpaces(cloud.url, token);
+      dispatch({type: 'CLOUD_CONNECTED', payload: {index: ci, user, spaces, token}});
       const firstSpace = spaces.find(s => s.driveType === 'personal') || spaces[0];
       if(firstSpace){
-        const spaceId = files.data.special[firstSpace.id];
-        if(spaceId) dispatch({type: 'FILEDIR', payload: spaceId});
-
-        const items = await listFiles(cloud.url, cloud.token, firstSpace.id, '/');
-        dispatch({type: 'CLOUD_INJECT_FILES', payload: {
-          parentId: spaceId || files.data.special[firstSpace.id],
-          files: items.map(f => ({
-            type: f.isFolder ? 'folder' : 'file',
-            name: f.name,
-            info: {icon: f.isFolder ? 'folder' : 'file'},
-            data: f.isFolder ? {} : f.name
-          }))
-        }});
+        dispatch({type: 'CLOUD_SELECT_SPACE', payload: firstSpace.id});
+        const items = await listFiles(cloud.url, token, firstSpace.id, '/');
+        dispatch({type: 'CLOUD_FILES_LOADED', payload: items});
       }
     } catch(err) {
-      dispatch({type: 'CLOUD_ERROR', payload: err.message});
+      alert('Anmeldung fehlgeschlagen: ' + err);
     }
   }
 
   const selectSpace = async (ci, space)=>{
     const cloud = clouds.list[ci];
     if(!cloud || !cloud.token) return;
+    dispatch({type: 'CLOUD_SELECT_SPACE', payload: space.id});
+    dispatch({type: 'CLOUD_NAVIGATE', payload: '/'});
     try {
-      const spaceId = files.data.special[space.id];
-      if(spaceId) dispatch({type: 'FILEDIR', payload: spaceId});
-
       const items = await listFiles(cloud.url, cloud.token, space.id, '/');
-      dispatch({type: 'CLOUD_INJECT_FILES', payload: {
-        parentId: spaceId,
-        files: items.map(f => ({
-          type: f.isFolder ? 'folder' : 'file',
-          name: f.name,
-          info: {icon: f.isFolder ? 'folder' : 'file'},
-          data: f.isFolder ? {} : f.name
-        }))
-      }});
+      dispatch({type: 'CLOUD_FILES_LOADED', payload: items});
     } catch(err) {
-      dispatch({type: 'CLOUD_ERROR', payload: err.message});
+      alert('Fehler: ' + err);
     }
   }
 

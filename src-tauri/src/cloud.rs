@@ -45,6 +45,7 @@ pub struct UserInfo {
 pub struct CloudState {
     pub client: Client,
     pub clouds: Mutex<Vec<CloudConfig>>,
+    pub oidc_rx: Mutex<Option<tokio::sync::oneshot::Receiver<Result<crate::oidc::TokenResponse, String>>>>,
 }
 
 impl CloudState {
@@ -52,6 +53,7 @@ impl CloudState {
         Self {
             client: Client::new(),
             clouds: Mutex::new(Vec::new()),
+            oidc_rx: Mutex::new(None),
         }
     }
 }
@@ -124,13 +126,12 @@ pub fn cloud_add(
     app: AppHandle,
     name: String,
     url: String,
-    token: Option<String>,
 ) -> Vec<CloudConfig> {
     let mut clouds = state.clouds.lock().unwrap();
     clouds.push(CloudConfig {
         name,
         url: url.trim_end_matches('/').to_string(),
-        token,
+        token: None,
     });
     save_clouds_to_disk(&app, &clouds);
     clouds.clone()
