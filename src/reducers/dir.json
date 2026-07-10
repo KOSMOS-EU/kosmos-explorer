@@ -1,0 +1,11 @@
+{
+  "clouds": {
+    "type": "folder",
+    "name": "Clouds",
+    "info": {
+      "icon": "thispc",
+      "spid": "%clouds%"
+    },
+    "data": {}
+  }
+}
