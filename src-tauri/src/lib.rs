@@ -63,10 +63,11 @@ pub fn run() {
 
             // Right: Cloud WebView (remote)
             // Links that want to open in new window → open as new Tauri window
+            let app_handle = app.handle().clone();
             let cloud_wv = tauri::WebviewBuilder::new("cloud", tauri::WebviewUrl::External("about:blank".parse().unwrap()))
-                .on_new_window(|url, _features| {
-                    eprintln!("[Cloud] New window: {}", url);
-                    tauri::webview::NewWindowResponse::Allow
+                .on_navigation(|url| {
+                    eprintln!("[Cloud] Navigate: {}", url);
+                    true // allow all navigation for now
                 });
             window.add_child(
                 cloud_wv,
