@@ -221,15 +221,15 @@ pub async fn cloud_list_files(
     space_id: String,
     path: String,
 ) -> Result<Vec<FileItem>, String> {
-    let encoded_space = urlencoding::encode(&space_id);
-    eprintln!("[API] list_files: space_id={} encoded={} path={}", space_id, encoded_space, path);
+    
+    eprintln!("[API] list_files: space_id={} encoded={} path={}", space_id, space_id, path);
     let endpoint = if path.is_empty() || path == "/" {
-        format!("/graph/v1.0/drives/{}/items/root/children", encoded_space)
+        format!("/graph/v1.0/drives/{}/items/root/children", space_id)
     } else {
         let clean = path.trim_start_matches('/');
         format!(
             "/graph/v1.0/drives/{}/items/root:/{clean}:/children",
-            encoded_space
+            space_id
         )
     };
 

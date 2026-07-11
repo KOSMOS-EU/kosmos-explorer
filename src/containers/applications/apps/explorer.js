@@ -370,6 +370,101 @@ const CloudView = ()=>{
   )
 }
 
+const FolderNode = ({cloud, space, path, name, icon, dispatch})=>{
+  const [open, setOpen] = useState(false);
+  const [children, setChildren] = useState(null);
+
+  const toggle = async ()=>{
+    if(!open && children === null){
+      try {
+        const items = await listFiles(cloud.url, cloud.bearer, space.id, path);
+        setChildren(items.filter(f => f.isFolder));
+      } catch { setChildren([]); }
+    }
+    setOpen(!open);
+  }
+
+  const hasChildren = children === null || children.length > 0;
+
+  return (
+    <div className="dropdownmenu" style={{paddingLeft:'0.6em'}}>
+      <div className="droptitle">
+        {hasChildren ? (
+          <Icon className="arrUi" fafa={open ? "faChevronDown" : "faChevronRight"}
+            width={10} onClick={toggle} pr/>
+        ) : (
+          <Icon className="arrUi opacity-0" fafa="faCircle" width={10}/>
+        )}
+        <div className="navtitle flex prtclk" onClick={()=>{
+          dispatch({type: 'CLOUD_SELECT_SPACE', payload: space.id});
+          dispatch({type: 'CLOUD_NAVIGATE', payload: path});
+        }}>
+          <Icon className="mr-1" src={"win/"+(icon || 'folder')+"-sm"} width={16}/>
+          <span>{name}</span>
+        </div>
+      </div>
+      {open && children && children.length > 0 && (
+        <div className="dropcontent">
+          {children.map((child) => (
+            <FolderNode key={child.id} cloud={cloud} space={space}
+              path={path === '/' ? '/' + child.name : path + '/' + child.name}
+              name={child.name} icon="folder" dispatch={dispatch}/>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+const SpaceNode = ({cloud, cloudIndex, space, isActive, dispatch})=>{
+  const [open, setOpen] = useState(false);
+  const [children, setChildren] = useState(null);
+
+  const toggle = async ()=>{
+    if(!open && children === null){
+      try {
+        const items = await listFiles(cloud.url, cloud.bearer, space.id, '/');
+        setChildren(items.filter(f => f.isFolder));
+      } catch { setChildren([]); }
+    }
+    setOpen(!open);
+  }
+
+  const select = ()=>{
+    dispatch({type: 'CLOUD_SELECT_SPACE', payload: space.id});
+    dispatch({type: 'CLOUD_NAVIGATE', payload: '/'});
+  }
+
+  const hasChildren = children === null || children.length > 0;
+  const spaceIcon = space.driveType === 'personal' ? 'user' : 'folder';
+
+  return (
+    <div className="dropdownmenu" style={{paddingLeft:'0.6em'}}>
+      <div className="droptitle">
+        {hasChildren ? (
+          <Icon className="arrUi" fafa={open ? "faChevronDown" : "faChevronRight"}
+            width={10} onClick={toggle} pr/>
+        ) : (
+          <Icon className="arrUi opacity-0" fafa="faCircle" width={10}/>
+        )}
+        <div className={"navtitle flex prtclk" + (isActive ? " font-bold" : "")}
+          onClick={select}>
+          <Icon className="mr-1" src={"win/"+spaceIcon+"-sm"} width={16}/>
+          <span>{space.name}</span>
+        </div>
+      </div>
+      {open && children && children.length > 0 && (
+        <div className="dropcontent">
+          {children.map((child) => (
+            <FolderNode key={child.id} cloud={cloud} space={space}
+              path={'/' + child.name} name={child.name} icon="folder" dispatch={dispatch}/>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 const NavPane = ({})=>{
   const clouds = useSelector(state => state.clouds);
   const files = useSelector(state => state.files);
@@ -386,35 +481,21 @@ const NavPane = ({})=>{
       try {
         const user = await getUser(cloud.url, bearer);
         const spaces = await listSpaces(cloud.url, bearer);
-        dispatch({type: 'CLOUD_CONNECTED', payload: {index: ci, user, spaces, bearer: bearer}});
-        const firstSpace = spaces.find(s => s.driveType === 'personal') || spaces[0];
-        if(firstSpace){
-          dispatch({type: 'CLOUD_SELECT_SPACE', payload: firstSpace.id});
-          const items = await listFiles(cloud.url, bearer, firstSpace.id, '/');
-          dispatch({type: 'CLOUD_FILES_LOADED', payload: items});
-        }
-        return; // Success, done
+        dispatch({type: 'CLOUD_CONNECTED', payload: {index: ci, user, spaces, bearer}});
+        return;
       } catch(err) {
-        // Token expired or invalid, fall through to OIDC
+        // Bearer expired or invalid, fall through to OIDC
       }
     }
 
-    // No token or token expired → OIDC login
+    // No bearer or expired → OIDC login
     try {
       bearer = await oidcLogin(cloud.url);
-      // Save the bearer
       await updateToken(ci, bearer);
-      dispatch({type: 'CLOUD_UPDATE', payload: {index: ci, bearer}});
 
       const user = await getUser(cloud.url, bearer);
       const spaces = await listSpaces(cloud.url, bearer);
-      dispatch({type: 'CLOUD_CONNECTED', payload: {index: ci, user, spaces, bearer: bearer}});
-      const firstSpace = spaces.find(s => s.driveType === 'personal') || spaces[0];
-      if(firstSpace){
-        dispatch({type: 'CLOUD_SELECT_SPACE', payload: firstSpace.id});
-        const items = await listFiles(cloud.url, bearer, firstSpace.id, '/');
-        dispatch({type: 'CLOUD_FILES_LOADED', payload: items});
-      }
+      dispatch({type: 'CLOUD_CONNECTED', payload: {index: ci, user, spaces, bearer}});
     } catch(err) {
       alert('Anmeldung fehlgeschlagen: ' + err);
     }
@@ -425,38 +506,41 @@ const NavPane = ({})=>{
     dispatch({type: 'CLOUD_SELECT_SPACE', payload: space.id});
   }
 
+  const [openClouds, setOpenClouds] = useState({});
+  const toggleCloud = (ci) => setOpenClouds(prev => ({...prev, [ci]: !prev[ci]}));
+
   return (
     <div className="navpane win11Scroll">
       <div className="extcont">
-        {clouds.list.map((cloud, ci) => (
-          <div key={ci} className="dropdownmenu">
-            <div className="droptitle">
-              <Icon className="arrUi" fafa={cloud.connected ? "faChevronDown" : "faChevronRight"}
-                width={10} onClick={()=>{ if(!cloud.connected) connectCloud(ci); }} pr/>
-              <div className="navtitle flex prtclk" onClick={()=>{
-                if(!cloud.connected) connectCloud(ci);
-              }}>
-                <Icon className="mr-1" src={"win/"+(cloud.connected ? "onedrive" : "disc")+"-sm"} width={16}/>
-                <span>{cloud.name}</span>
+        {clouds.list.map((cloud, ci) => {
+          const isOpen = openClouds[ci] || cloud.connected;
+          return (
+            <div key={ci} className="dropdownmenu">
+              <div className="droptitle">
+                <Icon className="arrUi" fafa={isOpen ? "faChevronDown" : "faChevronRight"}
+                  width={10} onClick={()=>{
+                    if(!cloud.connected) connectCloud(ci);
+                    else toggleCloud(ci);
+                  }} pr/>
+                <div className="navtitle flex prtclk" onClick={()=>{
+                  if(!cloud.connected) connectCloud(ci);
+                  else toggleCloud(ci);
+                }}>
+                  <Icon className="mr-1" src={"win/"+(cloud.connected ? "onedrive" : "disc")+"-sm"} width={16}/>
+                  <span>{cloud.name}</span>
+                </div>
               </div>
+              {isOpen && cloud.connected && cloud.spaces && (
+                <div className="dropcontent">
+                  {cloud.spaces.map((space) => (
+                    <SpaceNode key={space.id} cloud={cloud} cloudIndex={ci} space={space}
+                      isActive={clouds.activeSpace === space.id} dispatch={dispatch}/>
+                  ))}
+                </div>
+              )}
             </div>
-            {cloud.connected && cloud.spaces && (
-              <div className="dropcontent">
-                {cloud.spaces.map((space) => (
-                  <div key={space.id} className="dropdownmenu" style={{paddingLeft:'0.6em'}}>
-                    <div className="droptitle">
-                      <Icon className="arrUi opacity-0" fafa="faCircle" width={10}/>
-                      <div className="navtitle flex prtclk" onClick={()=>selectSpace(ci, space)}>
-                        <Icon className="mr-1" src={"win/"+(space.driveType==='personal'?'user':'folder')+"-sm"} width={16}/>
-                        <span>{space.name}</span>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   )

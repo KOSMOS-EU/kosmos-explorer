@@ -58,9 +58,9 @@ const cloudReducer = (state = defState, action) => {
       break;
     }
     case 'CLOUD_CONNECTED': {
-      const { index, user, spaces, token } = action.payload;
+      const { index, user, spaces, bearer } = action.payload;
       tmp.list = tmp.list.map((c, i) => i === index
-        ? { ...c, connected: true, user, spaces, token }
+        ? { ...c, connected: true, user, spaces, bearer }
         : c);
       tmp.activeCloud = index;
       if (spaces && spaces.length > 0) {
