@@ -233,7 +233,7 @@ export const Explorer = (props)=>{
             </div>
             <div className="sec2">
               <NavPane/>
-              <ContentArea searchtxt={searchtxt}/>
+              <CloudView/>
             </div>
             <StatusBar files={files} fdata={fdata}/>
           </div>
@@ -338,6 +338,38 @@ const ContentArea = ({searchtxt})=>{
   )
 }
 
+const CloudView = ()=>{
+  const clouds = useSelector(state => state.clouds);
+  const activeCloud = clouds.activeCloud !== null ? clouds.list[clouds.activeCloud] : null;
+  const activeSpace = clouds.activeSpace;
+
+  if(!activeCloud || !activeCloud.connected){
+    return (
+      <div className="contentarea" style={{display:'flex', alignItems:'center', justifyContent:'center'}}>
+        <span className="text-xs">Cloud auswählen</span>
+      </div>
+    )
+  }
+
+  // Build the cloud URL for the active space
+  let cloudUrl = activeCloud.url.replace(/\/$/, '');
+  if(activeSpace){
+    cloudUrl += '/f/' + activeSpace;
+  }
+  // TODO: append compact/theme params when OpenCloud supports them
+  // cloudUrl += '?appTheme=win&appCompact=true';
+
+  return (
+    <div className="contentarea" style={{padding:0, overflow:'hidden'}}>
+      <iframe
+        src={cloudUrl}
+        style={{width:'100%', height:'100%', border:'none'}}
+        title="Cloud"
+      />
+    </div>
+  )
+}
+
 const NavPane = ({})=>{
   const clouds = useSelector(state => state.clouds);
   const files = useSelector(state => state.files);
@@ -347,18 +379,18 @@ const NavPane = ({})=>{
     const cloud = clouds.list[ci];
     if(!cloud) return;
 
-    let token = cloud.token;
+    let bearer = cloud.bearer;
 
     // If we have a token, try it first
-    if(token) {
+    if(bearer) {
       try {
-        const user = await getUser(cloud.url, token);
-        const spaces = await listSpaces(cloud.url, token);
-        dispatch({type: 'CLOUD_CONNECTED', payload: {index: ci, user, spaces, token}});
+        const user = await getUser(cloud.url, bearer);
+        const spaces = await listSpaces(cloud.url, bearer);
+        dispatch({type: 'CLOUD_CONNECTED', payload: {index: ci, user, spaces, bearer: bearer}});
         const firstSpace = spaces.find(s => s.driveType === 'personal') || spaces[0];
         if(firstSpace){
           dispatch({type: 'CLOUD_SELECT_SPACE', payload: firstSpace.id});
-          const items = await listFiles(cloud.url, token, firstSpace.id, '/');
+          const items = await listFiles(cloud.url, bearer, firstSpace.id, '/');
           dispatch({type: 'CLOUD_FILES_LOADED', payload: items});
         }
         return; // Success, done
@@ -369,18 +401,18 @@ const NavPane = ({})=>{
 
     // No token or token expired → OIDC login
     try {
-      token = await oidcLogin(cloud.url);
+      bearer = await oidcLogin(cloud.url);
       // Save the bearer
-      await updateToken(ci, token);
-      dispatch({type: 'CLOUD_UPDATE', payload: {index: ci, token}});
+      await updateToken(ci, bearer);
+      dispatch({type: 'CLOUD_UPDATE', payload: {index: ci, bearer}});
 
-      const user = await getUser(cloud.url, token);
-      const spaces = await listSpaces(cloud.url, token);
-      dispatch({type: 'CLOUD_CONNECTED', payload: {index: ci, user, spaces, token}});
+      const user = await getUser(cloud.url, bearer);
+      const spaces = await listSpaces(cloud.url, bearer);
+      dispatch({type: 'CLOUD_CONNECTED', payload: {index: ci, user, spaces, bearer: bearer}});
       const firstSpace = spaces.find(s => s.driveType === 'personal') || spaces[0];
       if(firstSpace){
         dispatch({type: 'CLOUD_SELECT_SPACE', payload: firstSpace.id});
-        const items = await listFiles(cloud.url, token, firstSpace.id, '/');
+        const items = await listFiles(cloud.url, bearer, firstSpace.id, '/');
         dispatch({type: 'CLOUD_FILES_LOADED', payload: items});
       }
     } catch(err) {
@@ -388,17 +420,9 @@ const NavPane = ({})=>{
     }
   }
 
-  const selectSpace = async (ci, space)=>{
-    const cloud = clouds.list[ci];
-    if(!cloud || !cloud.token) return;
+  const selectSpace = (ci, space)=>{
+    // Just set the active space — the CloudView iframe navigates automatically
     dispatch({type: 'CLOUD_SELECT_SPACE', payload: space.id});
-    dispatch({type: 'CLOUD_NAVIGATE', payload: '/'});
-    try {
-      const items = await listFiles(cloud.url, cloud.token, space.id, '/');
-      dispatch({type: 'CLOUD_FILES_LOADED', payload: items});
-    } catch(err) {
-      alert('Fehler: ' + err);
-    }
   }
 
   return (
@@ -410,7 +434,7 @@ const NavPane = ({})=>{
               <Icon className="arrUi" fafa={cloud.connected ? "faChevronDown" : "faChevronRight"}
                 width={10} onClick={()=>{ if(!cloud.connected) connectCloud(ci); }} pr/>
               <div className="navtitle flex prtclk" onClick={()=>{
-                if(!cloud.connected && cloud.token) connectCloud(ci);
+                if(!cloud.connected) connectCloud(ci);
               }}>
                 <Icon className="mr-1" src={"win/"+(cloud.connected ? "onedrive" : "disc")+"-sm"} width={16}/>
                 <span>{cloud.name}</span>

@@ -1,18 +1,23 @@
 use reqwest::Client;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use rand::Rng;
 use std::sync::Mutex;
 use tokio::sync::oneshot;
 
-// ── OIDC Discovery ──
-
 #[derive(Debug, Deserialize)]
 struct OIDCConfig {
     authorization_endpoint: String,
     token_endpoint: String,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TokenResponse {
+    pub access_token: String,
+}
+
+const CLIENT_ID: &str = "OpenCloudDesktop";
 
 async fn discover(client: &Client, base_url: &str) -> Result<OIDCConfig, String> {
     let url = format!("{}/.well-known/openid-configuration", base_url.trim_end_matches('/'));
@@ -22,8 +27,6 @@ async fn discover(client: &Client, base_url: &str) -> Result<OIDCConfig, String>
     }
     resp.json().await.map_err(|e| format!("OIDC JSON: {}", e))
 }
-
-// ── PKCE ──
 
 fn generate_pkce() -> (String, String) {
     let mut buf = [0u8; 32];
@@ -40,50 +43,34 @@ fn generate_state() -> String {
     URL_SAFE_NO_PAD.encode(buf)
 }
 
-// ── Auth Session ──
-
-pub struct AuthSession {
-    pub auth_url: String,
-    verifier: String,
-    state: String,
-    token_endpoint: String,
-    redirect_uri: String,
-    result_tx: Option<oneshot::Sender<Result<TokenResponse, String>>>,
-    pub result_rx: Option<oneshot::Receiver<Result<TokenResponse, String>>>,
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct TokenResponse {
-    pub access_token: String,
-    pub refresh_token: Option<String>,
-    pub token_type: Option<String>,
-    pub expires_in: Option<u64>,
-}
-
 pub struct OIDCState {
-    pub session: Mutex<Option<AuthSession>>,
+    pub rx: Mutex<Option<oneshot::Receiver<Result<String, String>>>>,
 }
 
 impl OIDCState {
     pub fn new() -> Self {
-        Self { session: Mutex::new(None) }
+        Self { rx: Mutex::new(None) }
     }
 }
 
-const CLIENT_ID: &str = "web";
-
-// ── Start auth flow ──
-
-pub async fn start_auth(client: &Client, base_url: &str) -> Result<AuthSession, String> {
-    let config = discover(client, base_url).await?;
+/// Start OIDC flow: discover, PKCE, start callback server, return auth URL.
+/// The callback server handles code exchange and sends the token via channel.
+#[tauri::command]
+pub async fn oidc_start(
+    cloud_state: tauri::State<'_, crate::cloud::CloudState>,
+    oidc_state: tauri::State<'_, OIDCState>,
+    url: String,
+) -> Result<String, String> {
+    let client = cloud_state.client.clone();
+    let config = discover(&client, &url).await?;
     let (verifier, challenge) = generate_pkce();
     let state = generate_state();
 
-    // Start local callback server
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .map_err(|e| format!("Callback-Server: {}", e))?;
     let port = listener.local_addr().unwrap().port();
+    // Use 127.0.0.1 (not localhost) — Tauri intercepts "localhost" URLs
     let redirect_uri = format!("http://127.0.0.1:{}/callback", port);
 
     let auth_url = format!(
@@ -91,43 +78,37 @@ pub async fn start_auth(client: &Client, base_url: &str) -> Result<AuthSession, 
         config.authorization_endpoint,
         CLIENT_ID,
         urlencoding::encode(&redirect_uri),
-        urlencoding::encode("openid profile email offline_access"),
+        urlencoding::encode("openid profile email"),
         &state,
         &challenge,
     );
 
+    eprintln!("[OIDC] Auth URL: {}", auth_url);
+
     let (tx, rx) = oneshot::channel();
+    {
+        let mut guard = oidc_state.rx.lock().unwrap();
+        *guard = Some(rx);
+    }
 
-    let session = AuthSession {
-        auth_url: auth_url.clone(),
-        verifier: verifier.clone(),
-        state: state.clone(),
-        token_endpoint: config.token_endpoint.clone(),
-        redirect_uri: redirect_uri.clone(),
-        result_tx: Some(tx),
-        result_rx: Some(rx),
-    };
-
-    // Spawn callback server
-    let cb_state = state.clone();
+    // Spawn callback server — handles the full flow
+    let cb_state = state;
     let cb_verifier = verifier;
     let cb_token_endpoint = config.token_endpoint;
-    let cb_redirect_uri = redirect_uri;
-    let cb_client = client.clone();
+    let cb_redirect_uri = redirect_uri.clone();
+    let cb_client = client;
 
     tokio::spawn(async move {
-        if let Ok((stream, _)) = listener.accept().await {
-            handle_callback(
-                stream, &cb_client, &cb_state, &cb_verifier,
-                &cb_token_endpoint, &cb_redirect_uri,
-            ).await;
-        }
+        let result = match listener.accept().await {
+            Ok((stream, _)) => {
+                handle_callback(stream, &cb_client, &cb_state, &cb_verifier, &cb_token_endpoint, &cb_redirect_uri).await
+            }
+            Err(e) => Err(format!("Accept: {}", e)),
+        };
+        let _ = tx.send(result);
     });
 
-    // We need to return the session but the tx is moved into it
-    // The spawned task needs the tx... let me restructure
-
-    Ok(session)
+    Ok(auth_url)
 }
 
 async fn handle_callback(
@@ -137,196 +118,90 @@ async fn handle_callback(
     verifier: &str,
     token_endpoint: &str,
     redirect_uri: &str,
-) {
+) -> Result<String, String> {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     let mut buf = [0u8; 4096];
     let mut stream = stream;
     let n = stream.read(&mut buf).await.unwrap_or(0);
     let request = String::from_utf8_lossy(&buf[..n]);
-
-    // Parse GET /callback?code=...&state=...
     let first_line = request.lines().next().unwrap_or("");
     let path = first_line.split_whitespace().nth(1).unwrap_or("");
 
-    let url = format!("http://localhost{}", path);
-    let parsed = url::Url::parse(&url).ok();
+    eprintln!("[OIDC] Callback: {}", path);
 
-    let response_body;
+    let parsed = url::Url::parse(&format!("http://localhost{}", path))
+        .map_err(|_| "URL parse error".to_string())?;
+    let params: std::collections::HashMap<_, _> = parsed.query_pairs().collect();
 
-    if let Some(parsed) = parsed {
-        let params: std::collections::HashMap<_, _> = parsed.query_pairs().collect();
-
-        if let Some(error) = params.get("error") {
-            response_body = format!("Anmeldung fehlgeschlagen: {}", error);
-        } else if let Some(code) = params.get("code") {
-            let state = params.get("state").map(|s| s.as_ref()).unwrap_or("");
-            if state != expected_state {
-                response_body = "Ungültiger State-Parameter".to_string();
-            } else {
-                // Exchange code for token
-                match exchange_code(client, token_endpoint, code, redirect_uri, verifier).await {
-                    Ok(_token) => {
-                        response_body = "Anmeldung erfolgreich. Dieses Fenster kann geschlossen werden.".to_string();
-                    }
-                    Err(e) => {
-                        response_body = format!("Token-Fehler: {}", e);
-                    }
-                }
-            }
-        } else {
-            response_body = "Kein Authorization Code erhalten".to_string();
-        }
-    } else {
-        response_body = "Ungültige Anfrage".to_string();
+    // Check for error
+    if let Some(error) = params.get("error") {
+        let desc = params.get("error_description").map(|s| s.to_string()).unwrap_or_default();
+        let msg = format!("{}: {}", error, desc);
+        eprintln!("[OIDC] Error: {}", msg);
+        send_html(&mut stream, &format!("Fehler: {}", msg)).await;
+        return Err(msg);
     }
 
-    let http_response = format!(
-        "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nConnection: close\r\n\r\n\
-        <html><body style='font-family:Segoe UI,sans-serif;display:flex;align-items:center;\
-        justify-content:center;height:100vh'><p>{}</p></body></html>",
-        response_body
-    );
-    stream.write_all(http_response.as_bytes()).await.ok();
-}
+    let code = params.get("code").ok_or("Kein Code")?;
+    let state = params.get("state").map(|s| s.as_ref()).unwrap_or("");
 
-async fn exchange_code(
-    client: &Client,
-    token_endpoint: &str,
-    code: &str,
-    redirect_uri: &str,
-    verifier: &str,
-) -> Result<TokenResponse, String> {
-    let params = [
+    if state != expected_state {
+        send_html(&mut stream, "Ungültiger State").await;
+        return Err("State mismatch".to_string());
+    }
+
+    eprintln!("[OIDC] Got code, exchanging...");
+
+    // Exchange code for token
+    let form = [
         ("grant_type", "authorization_code"),
         ("client_id", CLIENT_ID),
-        ("code", code),
+        ("code", code.as_ref()),
         ("redirect_uri", redirect_uri),
         ("code_verifier", verifier),
     ];
 
-    let resp = client
-        .post(token_endpoint)
-        .form(&params)
-        .send()
-        .await
-        .map_err(|e| format!("Token-Anfrage: {}", e))?;
+    let resp = client.post(token_endpoint).form(&form).send().await
+        .map_err(|e| format!("Token request: {}", e))?;
 
     if !resp.status().is_success() {
         let body = resp.text().await.unwrap_or_default();
-        return Err(format!("Token-Fehler: {}", body));
+        eprintln!("[OIDC] Token exchange failed: {}", body);
+        send_html(&mut stream, &format!("Token-Fehler: {}", body)).await;
+        return Err(body);
     }
 
-    resp.json().await.map_err(|e| format!("Token-JSON: {}", e))
+    let token: TokenResponse = resp.json().await
+        .map_err(|e| format!("Token JSON: {}", e))?;
+
+    eprintln!("[OIDC] Token OK!");
+    send_html(&mut stream, "Anmeldung erfolgreich. Fenster wird geschlossen...").await;
+    Ok(token.access_token)
 }
 
-// ── Tauri Command: Start OIDC and return auth URL ──
-
-#[tauri::command]
-pub async fn oidc_start(
-    state: tauri::State<'_, crate::cloud::CloudState>,
-    url: String,
-) -> Result<String, String> {
-    let config = discover(&state.client, &url).await?;
-    let (verifier, challenge) = generate_pkce();
-    let oidc_state = generate_state();
-
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-        .await
-        .map_err(|e| format!("Callback-Server: {}", e))?;
-    let port = listener.local_addr().unwrap().port();
-    let redirect_uri = format!("http://127.0.0.1:{}/callback", port);
-
-    let auth_url = format!(
-        "{}?response_type=code&client_id={}&redirect_uri={}&scope={}&state={}&code_challenge={}&code_challenge_method=S256",
-        config.authorization_endpoint,
-        CLIENT_ID,
-        urlencoding::encode(&redirect_uri),
-        urlencoding::encode("openid profile email offline_access"),
-        &oidc_state,
-        &challenge,
+async fn send_html(stream: &mut tokio::net::TcpStream, msg: &str) {
+    use tokio::io::AsyncWriteExt;
+    let html = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nConnection: close\r\n\r\n\
+        <html><body style='font-family:Segoe UI,sans-serif;display:flex;align-items:center;\
+        justify-content:center;height:100vh;color:#333'><p>{}</p></body></html>",
+        msg
     );
-
-    // Spawn callback server that waits for the redirect
-    let (tx, rx) = oneshot::channel::<Result<TokenResponse, String>>();
-    let cb_client = state.client.clone();
-    let cb_state = oidc_state.clone();
-    let cb_verifier = verifier;
-    let cb_token_endpoint = config.token_endpoint;
-    let cb_redirect_uri = redirect_uri;
-
-    tokio::spawn(async move {
-        if let Ok((stream, _)) = listener.accept().await {
-            use tokio::io::{AsyncReadExt, AsyncWriteExt};
-
-            let mut buf = [0u8; 4096];
-            let mut stream = stream;
-            let n = stream.read(&mut buf).await.unwrap_or(0);
-            let request = String::from_utf8_lossy(&buf[..n]);
-            let first_line = request.lines().next().unwrap_or("");
-            let path = first_line.split_whitespace().nth(1).unwrap_or("");
-            let parsed_url = url::Url::parse(&format!("http://localhost{}", path)).ok();
-
-            let mut response_body = "Fehler".to_string();
-            let mut token_result: Result<TokenResponse, String> = Err("Kein Code".to_string());
-
-            if let Some(parsed) = parsed_url {
-                let params: std::collections::HashMap<_, _> = parsed.query_pairs().collect();
-                if let Some(code) = params.get("code") {
-                    let s = params.get("state").map(|s| s.as_ref()).unwrap_or("");
-                    if s == cb_state {
-                        match exchange_code(&cb_client, &cb_token_endpoint, code, &cb_redirect_uri, &cb_verifier).await {
-                            Ok(token) => {
-                                response_body = "Anmeldung erfolgreich. Sie können dieses Fenster schließen.".to_string();
-                                token_result = Ok(token);
-                            }
-                            Err(e) => {
-                                response_body = format!("Fehler: {}", e);
-                                token_result = Err(e);
-                            }
-                        }
-                    }
-                }
-            }
-
-            let http = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nConnection: close\r\n\r\n\
-                <html><body style='font-family:Segoe UI,sans-serif;display:flex;align-items:center;\
-                justify-content:center;height:100vh'><p>{}</p>\
-                <script>setTimeout(()=>window.close(),1000)</script></body></html>",
-                response_body
-            );
-            stream.write_all(http.as_bytes()).await.ok();
-            tx.send(token_result).ok();
-        }
-    });
-
-    // Store the receiver for oidc_wait
-    {
-        let mut session = state.oidc_rx.lock().unwrap();
-        *session = Some(rx);
-    }
-
-    Ok(auth_url)
+    let _ = stream.write_all(html.as_bytes()).await;
 }
 
+/// Wait for the OIDC flow to complete. Returns the access token.
 #[tauri::command]
 pub async fn oidc_wait(
-    state: tauri::State<'_, crate::cloud::CloudState>,
+    oidc_state: tauri::State<'_, OIDCState>,
 ) -> Result<String, String> {
     let rx = {
-        let mut session = state.oidc_rx.lock().unwrap();
-        session.take()
+        let mut guard = oidc_state.rx.lock().unwrap();
+        guard.take()
     };
-
     match rx {
-        Some(rx) => {
-            let result = rx.await.map_err(|_| "Login abgebrochen".to_string())?;
-            match result {
-                Ok(token) => Ok(token.access_token),
-                Err(e) => Err(e),
-            }
-        }
-        None => Err("Kein Login-Vorgang aktiv".to_string()),
+        Some(rx) => rx.await.map_err(|_| "Login abgebrochen".to_string())?,
+        None => Err("Kein Login aktiv".to_string()),
     }
 }

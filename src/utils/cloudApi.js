@@ -42,7 +42,7 @@ export async function removeCloud(index) {
 
 export async function updateToken(index, token) {
   const inv = await getInvoke();
-  if (inv) return inv('cloud_update_token', { index, token });
+  if (inv) return inv('cloud_update_bearer', { index, token });
   const clouds = await loadClouds();
   if (clouds[index]) clouds[index].token = token;
   localStorage.setItem('kosmos-clouds', JSON.stringify(clouds));
@@ -55,10 +55,10 @@ export async function oidcLogin(url) {
   const inv = await getInvoke();
   if (!inv) throw new Error('OIDC nur in Tauri verfügbar');
 
-  // Get auth URL from Rust (starts callback server)
+  // Get auth URL from Rust (starts callback server + PKCE)
   const authUrl = await inv('oidc_start', { url });
 
-  // Open login window
+  // Open login window with IdP page
   const { WebviewWindow } = await import('@tauri-apps/api/webviewWindow');
   const loginWin = new WebviewWindow('login', {
     url: authUrl,
@@ -69,7 +69,7 @@ export async function oidcLogin(url) {
     resizable: true,
   });
 
-  // Wait for token from Rust callback server
+  // Wait for callback server to receive code and exchange for token
   const token = await inv('oidc_wait');
 
   // Close login window

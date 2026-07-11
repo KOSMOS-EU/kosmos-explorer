@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Mutex;
+use urlencoding;
 use tauri::{AppHandle, Manager, State};
 
 // ── Types ──
@@ -11,7 +12,7 @@ use tauri::{AppHandle, Manager, State};
 pub struct CloudConfig {
     pub name: String,
     pub url: String,
-    pub token: Option<String>,
+    pub bearer: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -45,7 +46,6 @@ pub struct UserInfo {
 pub struct CloudState {
     pub client: Client,
     pub clouds: Mutex<Vec<CloudConfig>>,
-    pub oidc_rx: Mutex<Option<tokio::sync::oneshot::Receiver<Result<crate::oidc::TokenResponse, String>>>>,
 }
 
 impl CloudState {
@@ -53,7 +53,6 @@ impl CloudState {
         Self {
             client: Client::new(),
             clouds: Mutex::new(Vec::new()),
-            oidc_rx: Mutex::new(None),
         }
     }
 }
@@ -101,13 +100,15 @@ async fn api_get(
     if resp.status().as_u16() == 401 {
         return Err("sitzung_abgelaufen".to_string());
     }
-    if !resp.status().is_success() {
-        return Err(format!("API-Fehler {}", resp.status()));
+    let status = resp.status();
+    let body = resp.text().await.unwrap_or_default();
+
+    if !status.is_success() {
+        eprintln!("[API] Error {} for {}: {}", status, url, body);
+        return Err(format!("API-Fehler {}", status));
     }
 
-    resp.json()
-        .await
-        .map_err(|e| format!("JSON-Fehler: {}", e))
+    serde_json::from_str(&body).map_err(|e| format!("JSON-Fehler: {}", e))
 }
 
 // ── Tauri Commands: Cloud Management ──
@@ -131,7 +132,7 @@ pub fn cloud_add(
     clouds.push(CloudConfig {
         name,
         url: url.trim_end_matches('/').to_string(),
-        token: None,
+        bearer: None,
     });
     save_clouds_to_disk(&app, &clouds);
     clouds.clone()
@@ -152,7 +153,7 @@ pub fn cloud_remove(
 }
 
 #[tauri::command]
-pub fn cloud_update_token(
+pub fn cloud_update_bearer(
     state: State<'_, CloudState>,
     app: AppHandle,
     index: usize,
@@ -160,7 +161,7 @@ pub fn cloud_update_token(
 ) -> Vec<CloudConfig> {
     let mut clouds = state.clouds.lock().unwrap();
     if let Some(cloud) = clouds.get_mut(index) {
-        cloud.token = Some(token);
+        cloud.bearer = Some(token);
         save_clouds_to_disk(&app, &clouds);
     }
     clouds.clone()
@@ -190,7 +191,7 @@ pub async fn cloud_list_spaces(
     token: String,
 ) -> Result<Vec<Space>, String> {
     let data = api_get(&state.client, &url, &token, "/graph/v1.0/me/drives").await?;
-    let spaces = data["value"]
+    let mut spaces: Vec<Space> = data["value"]
         .as_array()
         .unwrap_or(&vec![])
         .iter()
@@ -200,6 +201,15 @@ pub async fn cloud_list_spaces(
             drive_type: d["driveType"].as_str().unwrap_or("").to_string(),
         })
         .collect();
+    // Personal first, then alphabetical
+    spaces.sort_by(|a, b| {
+        let a_personal = a.drive_type == "personal";
+        let b_personal = b.drive_type == "personal";
+        if a_personal != b_personal {
+            return if a_personal { std::cmp::Ordering::Less } else { std::cmp::Ordering::Greater };
+        }
+        a.name.to_lowercase().cmp(&b.name.to_lowercase())
+    });
     Ok(spaces)
 }
 
@@ -211,13 +221,15 @@ pub async fn cloud_list_files(
     space_id: String,
     path: String,
 ) -> Result<Vec<FileItem>, String> {
+    let encoded_space = urlencoding::encode(&space_id);
+    eprintln!("[API] list_files: space_id={} encoded={} path={}", space_id, encoded_space, path);
     let endpoint = if path.is_empty() || path == "/" {
-        format!("/graph/v1.0/drives/{}/items/root/children", space_id)
+        format!("/graph/v1.0/drives/{}/items/root/children", encoded_space)
     } else {
         let clean = path.trim_start_matches('/');
         format!(
             "/graph/v1.0/drives/{}/items/root:/{clean}:/children",
-            space_id
+            encoded_space
         )
     };
 
