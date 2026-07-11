@@ -7,6 +7,9 @@ use cloud::{
 };
 use oidc::{oidc_start, oidc_wait, OIDCState};
 use tauri::Manager;
+use std::sync::atomic::{AtomicU32, Ordering};
+
+static WINDOW_COUNTER: AtomicU32 = AtomicU32::new(0);
 
 #[tauri::command]
 fn navigate_cloud(app: tauri::AppHandle, url: String) -> Result<(), String> {
@@ -61,14 +64,49 @@ pub fn run() {
                 tauri::Size::Logical(tauri::LogicalSize::new(left_w, win_h)),
             ).expect("local webview failed");
 
-            // Right: Cloud WebView (remote)
-            // Links that want to open in new window → open as new Tauri window
+            // Right: Cloud WebView with on_new_window handler
             let app_handle = app.handle().clone();
-            let cloud_wv = tauri::WebviewBuilder::new("cloud", tauri::WebviewUrl::External("about:blank".parse().unwrap()))
-                .on_navigation(|url| {
-                    eprintln!("[Cloud] Navigate: {}", url);
-                    true // allow all navigation for now
-                });
+            let cloud_wv = tauri::WebviewBuilder::new(
+                "cloud",
+                tauri::WebviewUrl::External("about:blank".parse().unwrap()),
+            ).on_page_load(|wv, payload| {
+                if payload.event() == tauri::webview::PageLoadEvent::Finished {
+                    // Log window.open calls to stderr via title change
+                    wv.eval(
+                        "const _wo=window.open;window.open=function(...a){document.title='[WO] '+JSON.stringify(a);return _wo.apply(this,a);};"
+                    ).ok();
+                }
+            }).on_new_window(move |url, features| {
+                eprintln!("[Cloud] NEW WINDOW: {}", url);
+                let n = WINDOW_COUNTER.fetch_add(1, Ordering::Relaxed);
+                let label = format!("doc-{}", n);
+
+                // Create new window with related_view from opener
+                let mut builder = tauri::WebviewWindowBuilder::new(
+                    &app_handle,
+                    &label,
+                    tauri::WebviewUrl::External("about:blank".parse().unwrap()),
+                ).title("KOSMOS Explorer")
+                 .inner_size(900.0, 700.0);
+
+                // Linux: MUST set related_view for WebKit
+                #[cfg(target_os = "linux")]
+                {
+                    builder = builder.with_related_view(features.opener().webview.clone());
+                }
+
+                match builder.build() {
+                    Ok(win) => {
+                        eprintln!("[Cloud] Created window: {}", label);
+                        tauri::webview::NewWindowResponse::Create { window: win }
+                    }
+                    Err(e) => {
+                        eprintln!("[Cloud] Window creation failed: {}", e);
+                        tauri::webview::NewWindowResponse::Deny
+                    }
+                }
+            });
+
             window.add_child(
                 cloud_wv,
                 tauri::Position::Logical(tauri::LogicalPosition::new(left_w, 0.0)),
@@ -77,17 +115,6 @@ pub fn run() {
 
             eprintln!("[Setup] Local: {}x{}, Cloud: {}x{}", left_w, win_h, win_w - left_w, win_h);
 
-            // Enable window.open() in the cloud webview
-            #[cfg(target_os = "linux")]
-            if let Some(cloud_wv) = app.get_webview("cloud") {
-                cloud_wv.with_webview(|wv| {
-                    use webkit2gtk::{WebViewExt, SettingsExt};
-                    if let Some(settings) = wv.inner().settings() {
-                        settings.set_javascript_can_open_windows_automatically(true);
-                        eprintln!("[Setup] Enabled javascript_can_open_windows_automatically");
-                    }
-                }).ok();
-            }
 
             Ok(())
         })
