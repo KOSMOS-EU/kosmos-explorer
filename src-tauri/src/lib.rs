@@ -72,8 +72,9 @@ pub fn run() {
             ).on_page_load(|wv, payload| {
                 if payload.event() == tauri::webview::PageLoadEvent::Finished {
                     // Log window.open calls to stderr via title change
+                    // Set folderviews extension preferences (localStorage-based, not server-synced)
                     wv.eval(
-                        "const _wo=window.open;window.open=function(...a){document.title='[WO] '+JSON.stringify(a);return _wo.apply(this,a);};"
+                        "try{var ep=JSON.parse(localStorage.getItem('extensionPreferences')||'{}');ep['com.kosmos-eu.folderviews.app-new-window']={extensionPointId:'com.kosmos-eu.folderviews.app-new-window',selectedExtensionIds:['com.kosmos-eu.folderviews.app-new-window-enabled']};ep['com.kosmos-eu.folderviews.app-compact']={extensionPointId:'com.kosmos-eu.folderviews.app-compact',selectedExtensionIds:['com.kosmos-eu.folderviews.app-compact-enabled']};localStorage.setItem('extensionPreferences',JSON.stringify(ep));}catch(e){}"
                     ).ok();
                 }
             }).on_new_window(move |url, features| {
@@ -81,12 +82,22 @@ pub fn run() {
                 let n = WINDOW_COUNTER.fetch_add(1, Ordering::Relaxed);
                 let label = format!("doc-{}", n);
 
-                // Create new window with related_view from opener
+                // Extract app name and filename from URL path
+                let title = url.path_segments()
+                    .map(|segs| {
+                        let parts: Vec<&str> = segs.collect();
+                        let app = parts.first().unwrap_or(&"");
+                        let file = parts.last().unwrap_or(&"");
+                        let decoded_file = urlencoding::decode(file).unwrap_or((*file).into());
+                        format!("{} — {}", decoded_file, app)
+                    })
+                    .unwrap_or_else(|| "KOSMOS Explorer".to_string());
+
                 let mut builder = tauri::WebviewWindowBuilder::new(
                     &app_handle,
                     &label,
                     tauri::WebviewUrl::External("about:blank".parse().unwrap()),
-                ).title("KOSMOS Explorer")
+                ).title(&title)
                  .inner_size(900.0, 700.0);
 
                 // Linux: MUST set related_view for WebKit
