@@ -217,9 +217,9 @@
   }
 
   .nav-resize {
-    width: 3px;
+    width: 4px;
     cursor: col-resize;
-    background: var(--gray2);
+    background: #d0d0d0;
     flex-shrink: 0;
     position: relative;
     z-index: 10;
@@ -232,7 +232,7 @@
       right: -4px;
     }
     &:hover, &.dragging {
-      background: var(--clrPrm);
+      background: #0078d4;
     }
   }
 
