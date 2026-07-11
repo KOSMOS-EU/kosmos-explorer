@@ -19,7 +19,7 @@ tauri-build = { version = "2", features = [] }
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 log = "0.4"
-tauri = { version = "2", features = ["tray-icon"] }
+tauri = { version = "2", features = ["tray-icon", "unstable"] }
 tauri-plugin-log = "2"
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
 tokio = { version = "1", features = ["full"] }
@@ -28,3 +28,12 @@ base64 = "0.22"
 rand = "0.9"
 urlencoding = "2"
 url = "2"
+
+[patch.crates-io]
+tauri = { path = "/home/flash/gitapps/tauri/crates/tauri" }
+tauri-build = { path = "/home/flash/gitapps/tauri/crates/tauri-build" }
+tauri-runtime = { path = "/home/flash/gitapps/tauri/crates/tauri-runtime" }
+tauri-runtime-wry = { path = "/home/flash/gitapps/tauri/crates/tauri-runtime-wry" }
+tauri-utils = { path = "/home/flash/gitapps/tauri/crates/tauri-utils" }
+tauri-macros = { path = "/home/flash/gitapps/tauri/crates/tauri-macros" }
+tauri-codegen = { path = "/home/flash/gitapps/tauri/crates/tauri-codegen" }

@@ -2,7 +2,7 @@
 
 let invoke = null;
 
-async function getInvoke() {
+export async function getInvoke() {
   if (invoke) return invoke;
   try {
     const tauri = await import('@tauri-apps/api/core');

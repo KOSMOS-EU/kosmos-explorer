@@ -3,7 +3,7 @@ import {useSelector, useDispatch} from 'react-redux';
 import {Icon, Image, ToolBar} from '../../../utils/general';
 import {TauriToolBar} from '../../../components/TauriToolBar';
 import {dispatchAction, handleFileOpen} from '../../../actions';
-import {addCloud, getUser, listSpaces, listFiles, oidcLogin, updateToken} from '../../../utils/cloudApi';
+import {addCloud, getUser, listSpaces, listFiles, oidcLogin, updateToken, getInvoke} from '../../../utils/cloudApi';
 import './assets/fileexpo.scss';
 
 const NavTitle = (props)=>{
@@ -212,32 +212,16 @@ export const Explorer = (props)=>{
             dispatch({type:'CLOUD_DIALOG_CLOSE'});
           }}
         />}
-        <div className="windowScreen flex flex-col" style={{flex: 1}}>
-          <Ribbon onNew={()=>dispatch({type:'CLOUD_DIALOG_OPEN'})}/>
-          <div className="restWindow flex-grow flex flex-col">
-            <div className="sec1">
-              <Icon className={"navIcon hvtheme" + (files.hid==0?" disableIt":"")}
-                fafa="faArrowLeft" width={14} click="FILEPREV" pr/>
-              <Icon className={"navIcon hvtheme" + ((files.hid+1)==files.hist.length?" disableIt":"")}
-                fafa="faArrowRight" width={14} click="FILENEXT" pr/>
-              <Icon className="navIcon hvtheme" fafa="faArrowUp" width={14} click="FILEBACK" pr/>
-              <div className="path-bar noscroll" tabIndex="-1">
-                <input className="path-field" type="text" value={cpath}
-                  onChange={handleChange} onKeyDown={handleEnter}/>
-                <DirCont/>
-              </div>
-              <div className="srchbar">
-                <Icon className="searchIcon" src="search" width={12}/>
-                <input type="text" onChange={handleSearchChange} value={searchtxt} placeholder='Suchen'/>
+        <div style={{flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden'}}>
+          <div className="msribbon flex" style={{flexShrink: 0}}>
+            <div className="ribsec">
+              <div className="drdwcont flex prtclk" onClick={()=>dispatch({type:'CLOUD_DIALOG_OPEN'})} style={{cursor:'default'}}>
+                <Icon src="new" ui width={18} margin="0 6px"/>
+                <span>Neu</span>
               </div>
             </div>
-            <div className="sec2">
-              <NavPane/>
-              <NavResize/>
-              <CloudView/>
-            </div>
-            <StatusBar files={files} fdata={fdata}/>
           </div>
+          <NavPane/>
         </div>
       </div>
     );
@@ -410,6 +394,25 @@ const CloudView = ()=>{
   )
 }
 
+function buildCloudUrl(cloud, space, path) {
+  const base = cloud.url.replace(/\/$/, '');
+  const driveType = space.driveType === 'personal' ? 'personal' : 'project';
+  const slug = driveType === 'personal'
+    ? (cloud.user || '').toLowerCase().replace(/\s+/g, '-')
+    : space.name.toLowerCase().replace(/\s+/g, '-');
+  const rootId = space.id.split('$')[1] || '';
+  const fileId = space.id.replace(/\$/g, '%24') + '!' + rootId;
+  let urlPath = `/files/spaces/${driveType}/${slug}`;
+  if(path && path !== '/') urlPath += path;
+  return `${base}${urlPath}?fileId=${fileId}&sort-by=name&sort-dir=asc&items-per-page=100&view-mode=resource-table-condensed&tiles-size=2`;
+}
+
+async function openInCloud(cloud, space, path) {
+  const url = buildCloudUrl(cloud, space, path || '/');
+  const inv = await getInvoke();
+  if(inv) inv('navigate_cloud', {url}).catch(e => console.error(e));
+}
+
 const FolderNode = ({cloud, space, path, name, icon, dispatch})=>{
   const [open, setOpen] = useState(false);
   const [children, setChildren] = useState(null);
@@ -436,8 +439,7 @@ const FolderNode = ({cloud, space, path, name, icon, dispatch})=>{
           <Icon className="arrUi opacity-0" fafa="faCircle" width={10}/>
         )}
         <div className="navtitle flex prtclk" onClick={()=>{
-          dispatch({type: 'CLOUD_SELECT_SPACE', payload: space.id});
-          dispatch({type: 'CLOUD_NAVIGATE', payload: path});
+          openInCloud(cloud, space, path);
         }}>
           <Icon className="mr-1" src={"win/"+(icon || 'folder')+"-sm"} width={16}/>
           <span>{name}</span>
@@ -471,8 +473,7 @@ const SpaceNode = ({cloud, cloudIndex, space, isActive, dispatch})=>{
   }
 
   const select = ()=>{
-    dispatch({type: 'CLOUD_SELECT_SPACE', payload: space.id});
-    dispatch({type: 'CLOUD_NAVIGATE', payload: '/'});
+    openInCloud(cloud, space, '/');
   }
 
   const hasChildren = children === null || children.length > 0;
