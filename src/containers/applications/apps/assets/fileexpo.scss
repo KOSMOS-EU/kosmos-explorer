@@ -203,19 +203,33 @@
   display: flex;
 
   .navpane {
-    width: 180px;
+    width: 200px;
+    min-width: 120px;
+    max-width: 50%;
     max-height: 100%;
     padding: 0.4em 2px;
     overflow-x: hidden;
     overflow-y: scroll;
     border: 0 solid var(--gray2);
-    border-right-width: medium;
+    border-right-width: 0;
     position: relative;
+    flex-shrink: 0;
+  }
+
+  .nav-resize {
+    width: 4px;
+    cursor: col-resize;
+    background: var(--gray2);
+    flex-shrink: 0;
+    &:hover {
+      background: var(--clrPrm);
+    }
   }
 
   .contentarea {
     height: 100%;
     flex-grow: 1;
+    min-width: 200px;
   }
 }
 

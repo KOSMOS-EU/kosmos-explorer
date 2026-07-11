@@ -233,6 +233,7 @@ export const Explorer = (props)=>{
             </div>
             <div className="sec2">
               <NavPane/>
+              <NavResize/>
               <CloudView/>
             </div>
             <StatusBar files={files} fdata={fdata}/>
@@ -336,6 +337,31 @@ const ContentArea = ({searchtxt})=>{
       </div>
     </div>
   )
+}
+
+const NavResize = ()=>{
+  const startDrag = (e)=>{
+    e.preventDefault();
+    const sec2 = e.target.closest('.sec2');
+    const navpane = sec2?.querySelector('.navpane');
+    if(!navpane) return;
+
+    const startX = e.clientX;
+    const startW = navpane.offsetWidth;
+
+    const onMove = (e)=>{
+      const w = Math.max(120, Math.min(startW + e.clientX - startX, sec2.offsetWidth * 0.5));
+      navpane.style.width = w + 'px';
+    };
+    const onUp = ()=>{
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  };
+
+  return <div className="nav-resize" onMouseDown={startDrag}/>;
 }
 
 const CloudView = ()=>{

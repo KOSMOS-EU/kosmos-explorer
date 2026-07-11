@@ -223,40 +223,86 @@ pub async fn cloud_list_files(
     space_id: String,
     path: String,
 ) -> Result<Vec<FileItem>, String> {
-    
-    // Encode $ as %24 in space_id for the URL path
+    // Use WebDAV PROPFIND instead of Graph API (Graph returns 404 for OpenCloudDesktop client)
     let safe_id = space_id.replace('$', "%24");
-    eprintln!("[API] list_files: space_id={} safe_id={} path={}", space_id, safe_id, path);
-    let endpoint = if path.is_empty() || path == "/" {
-        format!("/graph/v1.0/drives/{}/items/root/children", safe_id)
+    let dav_path = if path.is_empty() || path == "/" {
+        format!("/dav/spaces/{}/", safe_id)
     } else {
-        let clean = path.trim_start_matches('/');
-        format!(
-            "/graph/v1.0/drives/{}/items/root:/{clean}:/children",
-            safe_id
-        )
+        let clean = path.trim_start_matches('/').trim_end_matches('/');
+        format!("/dav/spaces/{}/{}/", safe_id, clean)
     };
 
-    let data = api_get(&state.client, &url, &token, &endpoint).await?;
-    let mut items: Vec<FileItem> = data["value"]
-        .as_array()
-        .unwrap_or(&vec![])
-        .iter()
-        .map(|v| FileItem {
-            id: v["id"].as_str().unwrap_or("").to_string(),
-            name: v["name"].as_str().unwrap_or("").to_string(),
-            size: v["size"].as_u64().unwrap_or(0),
-            mime_type: v["file"]["mimeType"]
-                .as_str()
-                .unwrap_or("")
-                .to_string(),
-            is_folder: v["folder"].is_object(),
-            last_modified: v["lastModifiedDateTime"]
-                .as_str()
-                .unwrap_or("")
-                .to_string(),
-        })
-        .collect();
+    let dav_url = format!("{}{}", url.trim_end_matches('/'), dav_path);
+    eprintln!("[WebDAV] PROPFIND {}", dav_url);
+
+    let propfind_body = r#"<?xml version="1.0"?>
+<d:propfind xmlns:d="DAV:" xmlns:oc="http://owncloud.org/ns">
+  <d:prop>
+    <d:displayname/>
+    <d:resourcetype/>
+    <d:getcontentlength/>
+    <d:getlastmodified/>
+    <d:getetag/>
+    <d:getcontenttype/>
+    <oc:fileid/>
+    <oc:size/>
+  </d:prop>
+</d:propfind>"#;
+
+    let parsed_url = reqwest::Url::parse(&dav_url).map_err(|e| format!("URL-Fehler: {}", e))?;
+    let resp = state.client
+        .request(reqwest::Method::from_bytes(b"PROPFIND").unwrap(), parsed_url)
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Content-Type", "application/xml; charset=utf-8")
+        .header("Depth", "1")
+        .body(propfind_body)
+        .send()
+        .await
+        .map_err(|e| format!("WebDAV-Fehler: {}", e))?;
+
+    let status = resp.status();
+    let body = resp.text().await.unwrap_or_default();
+
+    if status.as_u16() == 401 {
+        return Err("sitzung_abgelaufen".to_string());
+    }
+    if !status.is_success() && status.as_u16() != 207 {
+        eprintln!("[WebDAV] Error {}: {}", status, body);
+        return Err(format!("WebDAV-Fehler {}", status));
+    }
+
+    // Parse WebDAV XML response
+    let mut items = Vec::new();
+    let mut is_first = true; // Skip first response (the folder itself)
+
+    for response_block in body.split("<d:response>").skip(1) {
+        if is_first { is_first = false; continue; }
+
+        let href = extract_xml(response_block, "d:href").unwrap_or_default();
+        let name = href.split('/').filter(|s| !s.is_empty()).last()
+            .map(|s| urlencoding::decode(s).unwrap_or_default().to_string())
+            .unwrap_or_default();
+
+        if name.is_empty() || name.starts_with('.') { continue; }
+
+        let is_folder = response_block.contains("<d:collection/>");
+        let size_str = extract_xml(response_block, "d:getcontentlength")
+            .or_else(|| extract_xml(response_block, "oc:size"))
+            .unwrap_or_default();
+        let size = size_str.parse::<u64>().unwrap_or(0);
+        let last_modified = extract_xml(response_block, "d:getlastmodified").unwrap_or_default();
+        let content_type = extract_xml(response_block, "d:getcontenttype").unwrap_or_default();
+        let file_id = extract_xml(response_block, "oc:fileid").unwrap_or_default();
+
+        items.push(FileItem {
+            id: file_id,
+            name,
+            size,
+            mime_type: content_type,
+            is_folder,
+            last_modified,
+        });
+    }
 
     items.sort_by(|a, b| {
         if a.is_folder != b.is_folder {
@@ -269,5 +315,18 @@ pub async fn cloud_list_files(
         a.name.to_lowercase().cmp(&b.name.to_lowercase())
     });
 
+    eprintln!("[WebDAV] {} items", items.len());
     Ok(items)
+}
+
+fn extract_xml(xml: &str, tag: &str) -> Option<String> {
+    let open = format!("<{}>", tag);
+    let close = format!("</{}>", tag);
+    let start = xml.find(&open)? + open.len();
+    let end = xml.find(&close)?;
+    if start < end {
+        Some(xml[start..end].to_string())
+    } else {
+        None
+    }
 }
