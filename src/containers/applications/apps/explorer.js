@@ -350,6 +350,9 @@ const NavResize = ()=>{
     const startX = e.clientX;
     const startW = navpane.offsetWidth;
 
+    const handle = e.target;
+    handle.classList.add('dragging');
+
     const onMove = (ev)=>{
       ev.preventDefault();
       const w = Math.max(120, Math.min(startW + ev.clientX - startX, sec2.offsetWidth * 0.5));
@@ -360,6 +363,7 @@ const NavResize = ()=>{
       document.removeEventListener('mouseup', onUp);
       document.body.style.cursor = '';
       document.body.style.userSelect = '';
+      handle.classList.remove('dragging');
     };
     document.body.style.cursor = 'col-resize';
     document.body.style.userSelect = 'none';
