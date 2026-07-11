@@ -77,6 +77,18 @@ pub fn run() {
 
             eprintln!("[Setup] Local: {}x{}, Cloud: {}x{}", left_w, win_h, win_w - left_w, win_h);
 
+            // Enable window.open() in the cloud webview
+            #[cfg(target_os = "linux")]
+            if let Some(cloud_wv) = app.get_webview("cloud") {
+                cloud_wv.with_webview(|wv| {
+                    use webkit2gtk::{WebViewExt, SettingsExt};
+                    if let Some(settings) = wv.inner().settings() {
+                        settings.set_javascript_can_open_windows_automatically(true);
+                        eprintln!("[Setup] Enabled javascript_can_open_windows_automatically");
+                    }
+                }).ok();
+            }
+
             Ok(())
         })
         .run(tauri::generate_context!())
