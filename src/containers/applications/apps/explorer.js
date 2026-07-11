@@ -352,6 +352,9 @@ const NavResize = ()=>{
 
     const handle = e.target;
     handle.classList.add('dragging');
+    // Block iframe from capturing mouse events during drag
+    const iframes = sec2.querySelectorAll('iframe');
+    iframes.forEach(f => f.style.pointerEvents = 'none');
 
     const onMove = (ev)=>{
       ev.preventDefault();
@@ -364,6 +367,7 @@ const NavResize = ()=>{
       document.body.style.cursor = '';
       document.body.style.userSelect = '';
       handle.classList.remove('dragging');
+      iframes.forEach(f => f.style.pointerEvents = '');
     };
     document.body.style.cursor = 'col-resize';
     document.body.style.userSelect = 'none';
