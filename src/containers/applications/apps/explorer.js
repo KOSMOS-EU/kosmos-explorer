@@ -394,26 +394,28 @@ const CloudView = ()=>{
   )
 }
 
-function buildCloudUrl(cloud, space, path) {
+function buildCloudUrl(cloud, space, path, folderId) {
   const base = cloud.url.replace(/\/$/, '');
   const driveType = space.driveType === 'personal' ? 'personal' : 'project';
   const slug = driveType === 'personal'
     ? (cloud.user || '').toLowerCase().replace(/\s+/g, '-')
     : space.name.toLowerCase().replace(/\s+/g, '-');
-  const rootId = space.id.split('$')[1] || '';
-  const fileId = space.id.replace(/\$/g, '%24') + '!' + rootId;
+  const spacePrefix = space.id.replace(/\$/g, '%24');
+  // fileId: spacePrefix!folderId (or rootId for space root)
+  const targetId = folderId || space.id.split('$')[1] || '';
+  const fileId = spacePrefix + '!' + targetId;
   let urlPath = `/files/spaces/${driveType}/${slug}`;
   if(path && path !== '/') urlPath += path;
   return `${base}${urlPath}?fileId=${fileId}&sort-by=name&sort-dir=asc&items-per-page=100&view-mode=resource-table-condensed&tiles-size=2`;
 }
 
-async function openInCloud(cloud, space, path) {
-  const url = buildCloudUrl(cloud, space, path || '/');
+async function openInCloud(cloud, space, path, folderId) {
+  const url = buildCloudUrl(cloud, space, path || '/', folderId);
   const inv = await getInvoke();
   if(inv) inv('navigate_cloud', {url}).catch(e => console.error(e));
 }
 
-const FolderNode = ({cloud, space, path, name, icon, dispatch})=>{
+const FolderNode = ({cloud, space, path, name, icon, fileId, dispatch})=>{
   const [open, setOpen] = useState(false);
   const [children, setChildren] = useState(null);
 
@@ -439,7 +441,7 @@ const FolderNode = ({cloud, space, path, name, icon, dispatch})=>{
           <Icon className="arrUi opacity-0" fafa="faCircle" width={10}/>
         )}
         <div className="navtitle flex prtclk" onClick={()=>{
-          openInCloud(cloud, space, path);
+          openInCloud(cloud, space, path, fileId);
         }}>
           <Icon className="mr-1" src={"win/"+(icon || 'folder')+"-sm"} width={16}/>
           <span>{name}</span>
@@ -450,7 +452,7 @@ const FolderNode = ({cloud, space, path, name, icon, dispatch})=>{
           {children.map((child) => (
             <FolderNode key={child.id} cloud={cloud} space={space}
               path={path === '/' ? '/' + child.name : path + '/' + child.name}
-              name={child.name} icon="folder" dispatch={dispatch}/>
+              name={child.name} icon="folder" fileId={child.id} dispatch={dispatch}/>
           ))}
         </div>
       )}
@@ -498,7 +500,7 @@ const SpaceNode = ({cloud, cloudIndex, space, isActive, dispatch})=>{
         <div className="dropcontent">
           {children.map((child) => (
             <FolderNode key={child.id} cloud={cloud} space={space}
-              path={'/' + child.name} name={child.name} icon="folder" dispatch={dispatch}/>
+              path={'/' + child.name} name={child.name} icon="folder" fileId={child.id} dispatch={dispatch}/>
           ))}
         </div>
       )}

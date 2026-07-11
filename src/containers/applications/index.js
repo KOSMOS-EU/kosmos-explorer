@@ -13,7 +13,7 @@ export * from './apps/notepad';
 export * from './apps/calculator';
 export * from './apps/explorer';
 export * from './apps/settings';
-export * from './apps/about';
+// export * from './apps/about';
 export * from './apps/spotify';
 export * from './apps/discord';
 export * from './apps/camera';
