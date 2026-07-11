@@ -89,6 +89,7 @@ async fn api_get(
     endpoint: &str,
 ) -> Result<serde_json::Value, String> {
     let url = format!("{}{}", base_url.trim_end_matches('/'), endpoint);
+    eprintln!("[API] GET {}", url);
     let resp = client
         .get(&url)
         .header("Authorization", format!("Bearer {}", token))
@@ -222,14 +223,16 @@ pub async fn cloud_list_files(
     path: String,
 ) -> Result<Vec<FileItem>, String> {
     
-    eprintln!("[API] list_files: space_id={} encoded={} path={}", space_id, space_id, path);
+    // Encode $ as %24 in space_id for the URL path
+    let safe_id = space_id.replace('$', "%24");
+    eprintln!("[API] list_files: space_id={} safe_id={} path={}", space_id, safe_id, path);
     let endpoint = if path.is_empty() || path == "/" {
-        format!("/graph/v1.0/drives/{}/items/root/children", space_id)
+        format!("/graph/v1.0/drives/{}/items/root/children", safe_id)
     } else {
         let clean = path.trim_start_matches('/');
         format!(
             "/graph/v1.0/drives/{}/items/root:/{clean}:/children",
-            space_id
+            safe_id
         )
     };
 
