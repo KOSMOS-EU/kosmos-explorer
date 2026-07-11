@@ -18,9 +18,30 @@ const defState = {
     app: {
       width: "310px",
       secwid: "200px"
+    },
+    cloud: {
+      width: "200px",
+      secwid: "120px"
     }
   },
   menus: {
+    cloud: [
+      {
+        name: "Verbinden",
+        action: "CLOUD_CONNECT_CTX"
+      },
+      {
+        name: "Trennen",
+        action: "CLOUD_DISCONNECT_CTX"
+      },
+      {
+        type: "hr"
+      },
+      {
+        name: "Löschen",
+        action: "CLOUD_REMOVE_CTX"
+      }
+    ],
     desk: [
       {
         name: "View",

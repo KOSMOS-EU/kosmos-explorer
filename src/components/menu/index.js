@@ -44,7 +44,8 @@ export const ActMenu = () => {
     event.stopPropagation();
     var action = {
       type: event.target.dataset.action,
-      payload: event.target.dataset.payload,
+      // Use item payload, or fall back to context payload (e.g. cloud index)
+      payload: event.target.dataset.payload || (menu.dataset && menu.dataset.payload),
     };
 
     if (action.type) {

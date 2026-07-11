@@ -482,6 +482,7 @@ const NavPane = ({})=>{
         const user = await getUser(cloud.url, bearer);
         const spaces = await listSpaces(cloud.url, bearer);
         dispatch({type: 'CLOUD_CONNECTED', payload: {index: ci, user, spaces, bearer}});
+        setOpenClouds(prev => ({...prev, [ci]: true}));
         return;
       } catch(err) {
         // Bearer expired or invalid, fall through to OIDC
@@ -496,6 +497,7 @@ const NavPane = ({})=>{
       const user = await getUser(cloud.url, bearer);
       const spaces = await listSpaces(cloud.url, bearer);
       dispatch({type: 'CLOUD_CONNECTED', payload: {index: ci, user, spaces, bearer}});
+      setOpenClouds(prev => ({...prev, [ci]: true}));
     } catch(err) {
       alert('Anmeldung fehlgeschlagen: ' + err);
     }
@@ -509,20 +511,45 @@ const NavPane = ({})=>{
   const [openClouds, setOpenClouds] = useState({});
   const toggleCloud = (ci) => setOpenClouds(prev => ({...prev, [ci]: !prev[ci]}));
 
+  const disconnectCloud = async (ci) => {
+    // Bearer ungültig machen — auch in der gespeicherten Config
+    await updateToken(ci, '');
+    dispatch({type: 'CLOUD_DISCONNECTED', payload: ci});
+    setOpenClouds(prev => ({...prev, [ci]: false}));
+  }
+
+  const removeCloud = async (ci) => {
+    const {removeCloud: apiRemove} = await import('../../../utils/cloudApi');
+    const list = await apiRemove(ci);
+    dispatch({type: 'CLOUD_SET_LIST', payload: list});
+  }
+
+  // Handle context menu actions via Redux pendingAction
+  useEffect(()=>{
+    if(!clouds.pendingAction) return;
+    const {type, index} = clouds.pendingAction;
+    dispatch({type: 'CLOUD_PENDING_HANDLED'});
+    if(type === 'CLOUD_CONNECT_CTX') connectCloud(index);
+    else if(type === 'CLOUD_DISCONNECT_CTX') disconnectCloud(index);
+    else if(type === 'CLOUD_REMOVE_CTX') removeCloud(index);
+  }, [clouds.pendingAction]);
+
   return (
     <div className="navpane win11Scroll">
       <div className="extcont">
         {clouds.list.map((cloud, ci) => {
-          const isOpen = openClouds[ci] || cloud.connected;
+          const isOpen = cloud.connected && (openClouds[ci] !== undefined ? openClouds[ci] : true);
           return (
-            <div key={ci} className="dropdownmenu">
+            <div key={ci} className="dropdownmenu" data-menu="cloud" data-payload={ci}>
               <div className="droptitle">
                 <Icon className="arrUi" fafa={isOpen ? "faChevronDown" : "faChevronRight"}
-                  width={10} onClick={()=>{
+                  width={10} onClick={(e)=>{
+                    if(e.button !== 0) return; // ignore right-click
                     if(!cloud.connected) connectCloud(ci);
                     else toggleCloud(ci);
                   }} pr/>
-                <div className="navtitle flex prtclk" onClick={()=>{
+                <div className="navtitle flex prtclk" onClick={(e)=>{
+                  if(e.button !== 0) return;
                   if(!cloud.connected) connectCloud(ci);
                   else toggleCloud(ci);
                 }}>

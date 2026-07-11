@@ -17,6 +17,39 @@ function App() {
     });
   }, []);
 
+  // Context menu handler (from original Win11web)
+  useEffect(() => {
+    window.oncontextmenu = (e) => {
+      e.preventDefault();
+      var data = {
+        top: e.clientY,
+        left: e.clientX
+      };
+
+      // Walk up the DOM to find the element with data-menu
+      var target = e.target;
+      while (target && target !== document.body) {
+        if (target.dataset && target.dataset.menu != null) {
+          data.menu = target.dataset.menu;
+          data.attr = target.attributes;
+          data.dataset = target.dataset;
+          dispatch({
+            type: 'MENUSHOW',
+            payload: data
+          });
+          return;
+        }
+        target = target.parentElement;
+      }
+
+      dispatch({type: 'MENUHIDE'});
+    };
+
+    window.onclick = () => {
+      dispatch({type: 'MENUHIDE'});
+    };
+  }, []);
+
   return (
     <div className="App">
       <div className="appwrap" style={{background: 'var(--bg1)', height: '100vh'}}>

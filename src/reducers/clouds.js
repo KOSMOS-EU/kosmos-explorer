@@ -34,6 +34,17 @@ const cloudReducer = (state = defState, action) => {
       tmp.dialogOpen = false;
       break;
     }
+    case 'CLOUD_CONNECT_CTX':
+    case 'CLOUD_DISCONNECT_CTX':
+    case 'CLOUD_REMOVE_CTX': {
+      // These are handled by NavPane via pendingAction
+      tmp.pendingAction = { type: action.type, index: parseInt(action.payload) };
+      break;
+    }
+    case 'CLOUD_PENDING_HANDLED': {
+      tmp.pendingAction = null;
+      break;
+    }
     case 'CLOUD_ADD': {
       const cloud = { name: action.payload.name, url: action.payload.url, connected: false };
       tmp.list = [...tmp.list, cloud];
@@ -76,7 +87,7 @@ const cloudReducer = (state = defState, action) => {
     }
     case 'CLOUD_DISCONNECTED': {
       tmp.list = tmp.list.map((c, i) => i === action.payload
-        ? { ...c, connected: false, user: null, spaces: null, token: null }
+        ? { ...c, connected: false, user: null, spaces: null, bearer: null }
         : c);
       if (tmp.activeCloud === action.payload) {
         tmp.activeCloud = null;

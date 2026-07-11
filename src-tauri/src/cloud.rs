@@ -88,10 +88,11 @@ async fn api_get(
     token: &str,
     endpoint: &str,
 ) -> Result<serde_json::Value, String> {
-    let url = format!("{}{}", base_url.trim_end_matches('/'), endpoint);
-    eprintln!("[API] GET {}", url);
+    let url_str = format!("{}{}", base_url.trim_end_matches('/'), endpoint);
+    eprintln!("[API] GET {}", url_str);
+    let url = reqwest::Url::parse(&url_str).map_err(|e| format!("URL-Fehler: {}", e))?;
     let resp = client
-        .get(&url)
+        .get(url)
         .header("Authorization", format!("Bearer {}", token))
         .header("Accept", "application/json")
         .send()
@@ -105,7 +106,7 @@ async fn api_get(
     let body = resp.text().await.unwrap_or_default();
 
     if !status.is_success() {
-        eprintln!("[API] Error {} for {}: {}", status, url, body);
+        eprintln!("[API] Error {} for {}: {}", status, url_str, body);
         return Err(format!("API-Fehler {}", status));
     }
 
