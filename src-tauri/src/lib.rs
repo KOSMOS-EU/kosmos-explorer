@@ -113,6 +113,19 @@ pub fn run() {
                 tauri::Size::Logical(tauri::LogicalSize::new(win_w - left_w, win_h)),
             ).expect("cloud webview failed");
 
+            // Enable window.open() in cloud WebView (WebKit blocks it by default)
+            let cloud = app.get_webview("cloud").unwrap();
+            cloud.with_webview(|wv| {
+                #[cfg(target_os = "linux")]
+                {
+                    use webkit2gtk::{WebViewExt, SettingsExt};
+                    if let Some(settings) = wv.inner().settings() {
+                        settings.set_javascript_can_open_windows_automatically(true);
+                        eprintln!("[Setup] javascript_can_open_windows_automatically = true");
+                    }
+                }
+            }).ok();
+
             eprintln!("[Setup] Local: {}x{}, Cloud: {}x{}", left_w, win_h, win_w - left_w, win_h);
 
 
