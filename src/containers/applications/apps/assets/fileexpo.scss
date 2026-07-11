@@ -217,11 +217,20 @@
   }
 
   .nav-resize {
-    width: 4px;
+    width: 3px;
     cursor: col-resize;
     background: var(--gray2);
     flex-shrink: 0;
-    &:hover {
+    position: relative;
+    &::after {
+      content: "";
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      left: -4px;
+      right: -4px;
+    }
+    &:hover, &:active {
       background: var(--clrPrm);
     }
   }

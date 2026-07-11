@@ -342,6 +342,7 @@ const ContentArea = ({searchtxt})=>{
 const NavResize = ()=>{
   const startDrag = (e)=>{
     e.preventDefault();
+    e.stopPropagation();
     const sec2 = e.target.closest('.sec2');
     const navpane = sec2?.querySelector('.navpane');
     if(!navpane) return;
@@ -349,14 +350,19 @@ const NavResize = ()=>{
     const startX = e.clientX;
     const startW = navpane.offsetWidth;
 
-    const onMove = (e)=>{
-      const w = Math.max(120, Math.min(startW + e.clientX - startX, sec2.offsetWidth * 0.5));
+    const onMove = (ev)=>{
+      ev.preventDefault();
+      const w = Math.max(120, Math.min(startW + ev.clientX - startX, sec2.offsetWidth * 0.5));
       navpane.style.width = w + 'px';
     };
     const onUp = ()=>{
       document.removeEventListener('mousemove', onMove);
       document.removeEventListener('mouseup', onUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
     };
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
     document.addEventListener('mousemove', onMove);
     document.addEventListener('mouseup', onUp);
   };
