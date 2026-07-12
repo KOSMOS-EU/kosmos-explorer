@@ -53,7 +53,7 @@ pub fn run() {
                 .title("KOSMOS Explorer")
                 .inner_size(win_w, win_h)
                 .min_inner_size(800.0, 600.0)
-                .decorations(false)
+                .decorations(true)
                 .build()
                 .expect("window failed");
 
@@ -74,7 +74,7 @@ pub fn run() {
                     // Log window.open calls to stderr via title change
                     // Set folderviews extension preferences (localStorage-based, not server-synced)
                     wv.eval(
-                        "try{var ep=JSON.parse(localStorage.getItem('extensionPreferences')||'{}');ep['com.kosmos-eu.folderviews.app-new-window']={extensionPointId:'com.kosmos-eu.folderviews.app-new-window',selectedExtensionIds:['com.kosmos-eu.folderviews.app-new-window-enabled']};ep['com.kosmos-eu.folderviews.app-compact']={extensionPointId:'com.kosmos-eu.folderviews.app-compact',selectedExtensionIds:['com.kosmos-eu.folderviews.app-compact-enabled']};localStorage.setItem('extensionPreferences',JSON.stringify(ep));}catch(e){}"
+                        "try{var ep=JSON.parse(localStorage.getItem('extensionPreferences')||'{}');ep['com.kosmos-eu.folderviews.app-new-window']={extensionPointId:'com.kosmos-eu.folderviews.app-new-window',selectedExtensionIds:['com.kosmos-eu.folderviews.app-new-window-enabled']};ep['com.kosmos-eu.folderviews.app-compact']={extensionPointId:'com.kosmos-eu.folderviews.app-compact',selectedExtensionIds:['com.kosmos-eu.folderviews.app-compact-enabled']};localStorage.setItem('extensionPreferences',JSON.stringify(ep));}catch(e){}setTimeout(function(){try{var d=[];d.push('search:'+location.search);d.push('theme:'+localStorage.getItem('oc_currentThemeName'));var cs=document.getElementById('oc-custom-theme-stylesheet');d.push('css:'+(cs?cs.href:'NONE'));var hb=document.querySelector('.oc-topbar-menu-burger');d.push('burger:'+(hb?getComputedStyle(hb).display:'MISS'));var tr=document.querySelector('.oc-tbody-tr');d.push('row:'+(tr?getComputedStyle(tr).height:'MISS'));document.title='[DBG] '+d.join(' | ');}catch(e){document.title='[DBG] err:'+e;}},6000);"
                     ).ok();
                 }
             }).on_new_window(move |url, features| {
@@ -124,15 +124,20 @@ pub fn run() {
                 tauri::Size::Logical(tauri::LogicalSize::new(win_w - left_w, win_h)),
             ).expect("cloud webview failed");
 
-            // Enable window.open() in cloud WebView (WebKit blocks it by default)
+            // Enable window.open() and clear cache in cloud WebView
             let cloud = app.get_webview("cloud").unwrap();
             cloud.with_webview(|wv| {
                 #[cfg(target_os = "linux")]
                 {
-                    use webkit2gtk::{WebViewExt, SettingsExt};
+                    use webkit2gtk::{WebViewExt, SettingsExt, WebContextExt};
                     if let Some(settings) = wv.inner().settings() {
                         settings.set_javascript_can_open_windows_automatically(true);
                         eprintln!("[Setup] javascript_can_open_windows_automatically = true");
+                    }
+                    // Clear WebKit cache on startup so theme CSS is always fresh
+                    if let Some(ctx) = wv.inner().context() {
+                        ctx.clear_cache();
+                        eprintln!("[Setup] WebKit cache cleared");
                     }
                 }
             }).ok();

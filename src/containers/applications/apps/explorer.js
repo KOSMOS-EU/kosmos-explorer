@@ -203,7 +203,7 @@ export const Explorer = (props)=>{
         display: 'flex', flexDirection: 'column',
         background: 'var(--bg0)'
       }}>
-        <TauriToolBar icon="explorer" name="KOSMOS Explorer"/>
+        {/* Native window decorations used instead */}
         {clouds.dialogOpen && <CloudDialogContent
           onClose={()=>dispatch({type:'CLOUD_DIALOG_CLOSE'})}
           onSave={async (data)=>{
