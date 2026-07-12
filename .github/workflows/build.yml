@@ -51,3 +51,45 @@ jobs:
           releaseBody: 'Desktop-Client für OpenCloud'
           releaseDraft: false
           prerelease: false
+
+  codeberg-release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download GitHub release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p artifacts
+          gh release download "${{ github.ref_name }}" \
+            --repo "${{ github.repository }}" \
+            --dir artifacts \
+            --pattern '*'
+
+      - name: Create Codeberg release
+        env:
+          CODEBERG_TOKEN: ${{ secrets.CODEBERG_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          # Create release
+          RELEASE_ID=$(curl -s -X POST \
+            -H "Authorization: token ${CODEBERG_TOKEN}" \
+            -H "Content-Type: application/json" \
+            "https://codeberg.org/api/v1/repos/kosmos-lab/kosmos-explorer/releases" \
+            -d "{\"tag_name\":\"${TAG}\",\"name\":\"KOSMOS Explorer ${TAG}\",\"body\":\"Desktop-Client für OpenCloud\",\"draft\":false,\"prerelease\":false}" \
+            | jq -r '.id')
+
+          echo "Created Codeberg release ID: ${RELEASE_ID}"
+
+          # Upload each artifact
+          for file in artifacts/*; do
+            [ -f "$file" ] || continue
+            filename=$(basename "$file")
+            echo "Uploading ${filename}..."
+            curl -s -X POST \
+              -H "Authorization: token ${CODEBERG_TOKEN}" \
+              -F "attachment=@${file}" \
+              "https://codeberg.org/api/v1/repos/kosmos-lab/kosmos-explorer/releases/${RELEASE_ID}/assets?name=${filename}"
+          done
+
+          echo "Codeberg release: https://codeberg.org/kosmos-lab/kosmos-explorer/releases/tag/${TAG}"
