@@ -406,7 +406,7 @@ function buildCloudUrl(cloud, space, path, folderId) {
   const fileId = spacePrefix + '!' + targetId;
   let urlPath = `/files/spaces/${driveType}/${slug}`;
   if(path && path !== '/') urlPath += path;
-  return `${base}${urlPath}?fileId=${fileId}&sort-by=name&sort-dir=asc&items-per-page=100&view-mode=resource-table-condensed&tiles-size=2`;
+  return `${base}${urlPath}?fileId=${fileId}&sort-by=name&sort-dir=asc&items-per-page=100&view-mode=resource-table-condensed&tiles-size=2&appTheme=Windows%2011%20Light`;
 }
 
 async function openInCloud(cloud, space, path, folderId) {
