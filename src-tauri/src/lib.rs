@@ -73,10 +73,20 @@ pub fn run() {
                 if payload.event() == tauri::webview::PageLoadEvent::Finished {
                     // Log window.open calls to stderr via title change
                     // Set folderviews extension preferences (localStorage-based, not server-synced)
-                    // Inject desktop styles + extension preferences
-                    wv.eval(
-                        "try{var ep=JSON.parse(localStorage.getItem('extensionPreferences')||'{}');ep['com.kosmos-eu.folderviews.app-new-window']={extensionPointId:'com.kosmos-eu.folderviews.app-new-window',selectedExtensionIds:['com.kosmos-eu.folderviews.app-new-window-enabled']};ep['com.kosmos-eu.folderviews.app-compact']={extensionPointId:'com.kosmos-eu.folderviews.app-compact',selectedExtensionIds:['com.kosmos-eu.folderviews.app-compact-enabled']};localStorage.setItem('extensionPreferences',JSON.stringify(ep));}catch(e){}\ntry{if(!document.getElementById('kosmos-desktop-style')){var s=document.createElement('style');s.id='kosmos-desktop-style';s.textContent='#mobile-nav{display:none!important}#web-nav-sidebar{display:none!important}';document.head.appendChild(s);console.log('[KOSMOS] desktop style injected');}}catch(e){console.error('[KOSMOS] style inject failed',e);}"
-                    ).ok();
+                    // Inject extension preferences + desktop styles
+                    wv.eval(concat!(
+                        // Extension preferences
+                        "try{var ep=JSON.parse(localStorage.getItem('extensionPreferences')||'{}');",
+                        "ep['com.kosmos-eu.folderviews.app-new-window']={extensionPointId:'com.kosmos-eu.folderviews.app-new-window',selectedExtensionIds:['com.kosmos-eu.folderviews.app-new-window-enabled']};",
+                        "ep['com.kosmos-eu.folderviews.app-compact']={extensionPointId:'com.kosmos-eu.folderviews.app-compact',selectedExtensionIds:['com.kosmos-eu.folderviews.app-compact-enabled']};",
+                        "localStorage.setItem('extensionPreferences',JSON.stringify(ep));}catch(e){}",
+                        // Desktop style: inject <style> tag AND use MutationObserver as fallback
+                        "try{if(!document.getElementById('kosmos-desktop-style')){",
+                        "var s=document.createElement('style');s.id='kosmos-desktop-style';",
+                        "s.textContent='#mobile-nav{display:none!important}#web-nav-sidebar{display:none!important}';",
+                        "(document.head||document.documentElement).appendChild(s);",
+                        "}}catch(e){}",
+                    )).ok();
                     eprintln!("[Inject] desktop style for {}", payload.url());
                 }
             }).on_new_window(move |url, features| {
